@@ -339,21 +339,21 @@ async def honeypot_endpoint(request: Request, honeypot_request: HoneypotRequest)
             session["agentNotes"] = f"{session['agentNotes']} | {', '.join(scam_indicators)}"
         
         # Calculate engagement metrics
+        from datetime import timezone
         start_time_session = session["startTime"]
         if isinstance(start_time_session, str):
-            from datetime import datetime, timezone
+            from datetime import datetime
             start_time_session = datetime.fromisoformat(start_time_session.replace('Z', '+00:00'))
         
-        # Ensure both timestamps are timezone-aware
+        # Ensure both timestamps are timezone-aware (UTC)
         current_timestamp = honeypot_request.message.timestamp
         if current_timestamp.tzinfo is None:
-            from datetime import timezone
             current_timestamp = current_timestamp.replace(tzinfo=timezone.utc)
         if start_time_session.tzinfo is None:
-            from datetime import timezone
             start_time_session = start_time_session.replace(tzinfo=timezone.utc)
         
-        duration_seconds = int((current_timestamp - start_time_session).total_seconds())
+        # Calculate duration, handle negative durations
+        duration_seconds = max(0, int((current_timestamp - start_time_session).total_seconds()))
         
         engagement_metrics = {
             "engagementDurationSeconds": duration_seconds,

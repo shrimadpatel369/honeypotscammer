@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     
     # Google Gemini (Premium)
     gemini_api_key: str
-    gemini_model: str = "gemini-2.0-flash-thinking-exp"
+    gemini_model: str = "gemini-1.5-flash"
     gemini_max_retries: int = 3
     gemini_timeout: int = 30
     
