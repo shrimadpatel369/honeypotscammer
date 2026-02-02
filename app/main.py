@@ -186,11 +186,29 @@ async def health_check():
     dependencies=[Depends(verify_api_key)]
 )
 @limiter.limit(f"{settings.rate_limit_per_minute}/minute")
-async def message_endpoint(request: Request, honeypot_request: HoneypotRequest):
+async def message_endpoint(request: Request):
     """
     Main endpoint for hackathon - accepts messages as per specification
+    Logs raw request first, then validates
     """
-    return await honeypot_endpoint(request, honeypot_request)
+    # Log raw request body first
+    try:
+        raw_body = await request.body()
+        logger.info(f"🔍 RAW REQUEST RECEIVED - Content-Type: {request.headers.get('content-type')}")
+        logger.info(f"Raw Body: {raw_body.decode('utf-8')}")
+        
+        # Parse and validate
+        body_json = await request.json()
+        logger.info(f"Parsed JSON: {body_json}")
+        
+        honeypot_request = HoneypotRequest(**body_json)
+        return await honeypot_endpoint(request, honeypot_request)
+    except Exception as e:
+        logger.error(f"❌ REQUEST VALIDATION FAILED: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid request format: {str(e)}"
+        )
 
 
 @app.post(
