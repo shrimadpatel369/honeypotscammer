@@ -1,7 +1,8 @@
-from pydantic import BaseModel, Field
-from typing import List, Optional, Dict, Any
+from pydantic import BaseModel, Field, field_validator
+from typing import List, Optional, Dict, Any, Union
 from datetime import datetime
 from enum import Enum
+import uuid
 
 
 class SenderType(str, Enum):
@@ -40,8 +41,8 @@ class Metadata(BaseModel):
 
 class HoneypotRequest(BaseModel):
     """Incoming request to the honeypot API"""
-    sessionId: str = Field(..., description="Unique session identifier")
-    message: Message = Field(..., description="Current incoming message")
+    sessionId: Optional[str] = Field(default_factory=lambda: str(uuid.uuid4()), description="Unique session identifier")
+    message: Union[str, Message] = Field(..., description="Current incoming message")
     conversationHistory: List[Message] = Field(
         default_factory=list,
         description="Previous messages in the conversation"
@@ -50,6 +51,18 @@ class HoneypotRequest(BaseModel):
         default=None,
         description="Additional context about the message"
     )
+    
+    @field_validator('message', mode='before')
+    @classmethod
+    def convert_message(cls, v):
+        """Convert string message to Message object"""
+        if isinstance(v, str):
+            return Message(
+                sender=SenderType.SCAMMER,
+                text=v,
+                timestamp=datetime.utcnow()
+            )
+        return v
 
     class Config:
         extra = "allow"
