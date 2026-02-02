@@ -117,13 +117,28 @@ Analyze comprehensively and respond ONLY with valid JSON:
                     logger.warning(f"Gemini API attempt {attempt + 1} failed: {e}")
                     continue
             
-            # Parse JSON response
+            # Parse JSON response - clean up markdown and trailing commas
             if response_text.startswith("```json"):
                 response_text = response_text.replace("```json", "").replace("```", "").strip()
             elif response_text.startswith("```"):
                 response_text = response_text.replace("```", "").strip()
             
-            result = json.loads(response_text)
+            # Fix common JSON issues: trailing commas, missing quotes
+            import re
+            # Remove trailing commas before ] or }
+            response_text = re.sub(r',(\s*[}\]])', r'\1', response_text)
+            
+            try:
+                result = json.loads(response_text)
+            except json.JSONDecodeError:
+                # Try to extract JSON from response
+                json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
+                if json_match:
+                    response_text = json_match.group(0)
+                    response_text = re.sub(r',(\s*[}\]])', r'\1', response_text)
+                    result = json.loads(response_text)
+                else:
+                    raise
             
             is_scam = result.get("is_scam", False)
             confidence = result.get("confidence", 0.0)
@@ -157,32 +172,51 @@ Analyze comprehensively and respond ONLY with valid JSON:
         """Fallback keyword-based scam detection"""
         message_lower = message.lower()
         
-        # Common scam keywords
-        scam_keywords = {
-            "account blocked": 0.8,
-            "account suspended": 0.8,
-            "verify immediately": 0.7,
-            "urgent action": 0.7,
+        # High-priority scam keywords (almost certain scam)
+        high_priority_keywords = {
+            "share otp": 0.95,
+            "share pin": 0.95,
+            "share cvv": 0.95,
+            "share password": 0.95,
+            "account blocked": 0.9,
+            "account suspended": 0.9,
+            "account compromised": 0.9,
+            "verify immediately": 0.85,
+            "urgent": 0.7,
+        }
+        
+        # Medium-priority keywords
+        medium_priority_keywords = {
             "click here": 0.6,
-            "share otp": 0.9,
-            "share pin": 0.9,
-            "upi id": 0.7,
+            "upi id": 0.65,
             "bank account": 0.6,
             "congratulations": 0.6,
             "won prize": 0.7,
-            "refund": 0.5,
+            "refund": 0.55,
             "expire": 0.6,
-            "suspend": 0.6,
+            "suspend": 0.65,
+            "blocked": 0.65,
+            "verify": 0.55,
+            "immediately": 0.6,
         }
         
         detected_indicators = []
         max_confidence = 0.0
         
-        for keyword, confidence in scam_keywords.items():
+        # Check high priority first
+        for keyword, confidence in high_priority_keywords.items():
             if keyword in message_lower:
-                detected_indicators.append(keyword)
+                detected_indicators.append(keyword.replace(" ", "_"))
+                max_confidence = max(max_confidence, confidence)
+        
+        # Check medium priority
+        for keyword, confidence in medium_priority_keywords.items():
+            if keyword in message_lower:
+                detected_indicators.append(keyword.replace(" ", "_"))
                 max_confidence = max(max_confidence, confidence)
         
         is_scam = max_confidence >= 0.6
+        
+        logger.warning(f"Using fallback detection: is_scam={is_scam}, confidence={max_confidence}, indicators={detected_indicators}")
         
         return is_scam, max_confidence, detected_indicators
