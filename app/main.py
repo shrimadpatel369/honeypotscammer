@@ -341,10 +341,19 @@ async def honeypot_endpoint(request: Request, honeypot_request: HoneypotRequest)
         # Calculate engagement metrics
         start_time_session = session["startTime"]
         if isinstance(start_time_session, str):
-            from datetime import datetime
+            from datetime import datetime, timezone
             start_time_session = datetime.fromisoformat(start_time_session.replace('Z', '+00:00'))
         
-        duration_seconds = int((honeypot_request.message.timestamp - start_time_session).total_seconds())
+        # Ensure both timestamps are timezone-aware
+        current_timestamp = honeypot_request.message.timestamp
+        if current_timestamp.tzinfo is None:
+            from datetime import timezone
+            current_timestamp = current_timestamp.replace(tzinfo=timezone.utc)
+        if start_time_session.tzinfo is None:
+            from datetime import timezone
+            start_time_session = start_time_session.replace(tzinfo=timezone.utc)
+        
+        duration_seconds = int((current_timestamp - start_time_session).total_seconds())
         
         engagement_metrics = {
             "engagementDurationSeconds": duration_seconds,
