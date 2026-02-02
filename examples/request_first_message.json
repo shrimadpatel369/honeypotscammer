@@ -1,0 +1,14 @@
+{
+  "sessionId": "test-session-001",
+  "message": {
+    "sender": "scammer",
+    "text": "Your bank account will be blocked today. Verify immediately by clicking this link: http://fake-bank-site.com/verify",
+    "timestamp": "2026-02-02T10:15:30Z"
+  },
+  "conversationHistory": [],
+  "metadata": {
+    "channel": "SMS",
+    "language": "English",
+    "locale": "IN"
+  }
+}

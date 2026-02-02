@@ -1,0 +1,62 @@
+version: '3.8'
+
+services:
+  # FastAPI Application
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: honeypot-api
+    ports:
+      - "8000:8000"
+    environment:
+      - ENV=production
+      - DEBUG=False
+      - API_KEY=${API_KEY}
+      - MONGODB_URL=mongodb://mongodb:27017
+      - MONGODB_DB_NAME=${MONGODB_DB_NAME}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - GEMINI_MODEL=${GEMINI_MODEL}
+      - GUVI_CALLBACK_URL=${GUVI_CALLBACK_URL}
+    depends_on:
+      - mongodb
+    networks:
+      - honeypot-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # MongoDB Database
+  mongodb:
+    image: mongo:7.0
+    container_name: honeypot-mongodb
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb-data:/data/db
+      - mongodb-config:/data/configdb
+    environment:
+      - MONGO_INITDB_DATABASE=${MONGODB_DB_NAME}
+    networks:
+      - honeypot-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+networks:
+  honeypot-network:
+    driver: bridge
+
+volumes:
+  mongodb-data:
+    driver: local
+  mongodb-config:
+    driver: local

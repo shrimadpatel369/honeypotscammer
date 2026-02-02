@@ -1,0 +1,188 @@
+import google.generativeai as genai
+from app.config import settings
+import logging
+from typing import List, Tuple, Dict, Any
+import json
+import hashlib
+from app.cache import cache
+
+logger = logging.getLogger(__name__)
+
+# Configure Gemini with premium settings
+genai.configure(api_key=settings.gemini_api_key)
+
+
+class ScamDetectorService:
+    """Service for detecting scam intent in messages - Optimized for premium Gemini"""
+    
+    def __init__(self):
+        # Use premium model with optimized generation config
+        self.model = genai.GenerativeModel(
+            settings.gemini_model,
+            generation_config={
+                "temperature": 0.3,  # Lower for more consistent detection
+                "top_p": 0.95,
+                "top_k": 40,
+                "max_output_tokens": 1024,
+            }
+        )
+        
+    def _get_cache_key(self, message: str, history_length: int) -> str:
+        """Generate cache key for scam detection"""
+        content = f"{message}:{history_length}"
+        return f"scam_detect:{hashlib.md5(content.encode()).hexdigest()}"
+        
+    async def detect_scam(
+        self,
+        current_message: str,
+        conversation_history: List[Dict[str, Any]],
+        metadata: Dict[str, Any]
+    ) -> Tuple[bool, float, List[str]]:
+        """
+        Detect if a message contains scam intent with caching
+        
+        Args:
+            current_message: The latest message to analyze
+            conversation_history: Previous messages in the conversation
+            metadata: Additional context (channel, language, locale)
+            
+        Returns:
+            Tuple of (scam_detected, confidence, indicators)
+        """
+        # Check cache first for performance
+        if settings.enable_caching:
+            cache_key = self._get_cache_key(current_message, len(conversation_history))
+            cached_result = await cache.get(cache_key)
+            if cached_result:
+                logger.debug(f"Cache hit for scam detection")
+                return cached_result
+        
+        try:
+            # Build context from conversation history
+            context = ""
+            if conversation_history:
+                context = "Previous conversation:\n"
+                for msg in conversation_history[-5:]:  # Last 5 messages for context
+                    sender = msg.get("sender", "unknown")
+                    text = msg.get("text", "")
+                    context += f"{sender}: {text}\n"
+            
+            # Create detection prompt - optimized for premium model
+            prompt = f"""You are an expert scam detection system with advanced pattern recognition. Analyze the message with high precision.
+
+Channel: {metadata.get('channel', 'Unknown')}
+Language: {metadata.get('language', 'Unknown')}
+Locale: {metadata.get('locale', 'Unknown')}
+
+{context}
+
+Current message to analyze: "{current_message}"
+
+Scam indicators to check:
+HIGH SEVERITY:
+- Requests for OTP, PIN, CVV, passwords, or sensitive credentials
+- Threats of immediate account suspension/blocking
+- Impersonation of banks, government, or trusted entities
+- Requests for immediate money transfers or payments
+- Sharing of suspicious payment links or account details
+
+MEDIUM SEVERITY:
+- Urgency and time pressure tactics
+- Promises of prizes, refunds, or unrealistic offers
+- Requests to click suspicious links
+- Poor grammar in professional contexts
+- Requests for personal information verification
+
+Analyze comprehensively and respond ONLY with valid JSON:
+{{
+    "is_scam": true/false,
+    "confidence": 0.0-1.0,
+    "indicators": ["indicator1", "indicator2"],
+    "reasoning": "brief technical explanation",
+    "severity": "high/medium/low"
+}}"""
+
+            # Generate response with retry logic
+            for attempt in range(settings.gemini_max_retries):
+                try:
+                    response = self.model.generate_content(
+                        prompt,
+                        request_options={'timeout': settings.gemini_timeout}
+                    )
+                    response_text = response.text.strip()
+                    break
+                except Exception as e:
+                    if attempt == settings.gemini_max_retries - 1:
+                        raise
+                    logger.warning(f"Gemini API attempt {attempt + 1} failed: {e}")
+                    continue
+            
+            # Parse JSON response
+            if response_text.startswith("```json"):
+                response_text = response_text.replace("```json", "").replace("```", "").strip()
+            elif response_text.startswith("```"):
+                response_text = response_text.replace("```", "").strip()
+            
+            result = json.loads(response_text)
+            
+            is_scam = result.get("is_scam", False)
+            confidence = result.get("confidence", 0.0)
+            indicators = result.get("indicators", [])
+            reasoning = result.get("reasoning", "")
+            severity = result.get("severity", "low")
+            
+            logger.info(
+                f"Scam detection: {is_scam} (confidence: {confidence}, severity: {severity}) - {reasoning}"
+            )
+            
+            detection_result = (is_scam, confidence, indicators)
+            
+            # Cache the result
+            if settings.enable_caching:
+                await cache.set(cache_key, detection_result, ttl=settings.cache_ttl)
+            
+            return detection_result
+            
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse JSON from Gemini response: {e}")
+            logger.error(f"Response text: {response_text}")
+            # Fallback to keyword-based detection
+            return self._fallback_detection(current_message)
+        except Exception as e:
+            logger.error(f"Error in scam detection: {str(e)}", exc_info=True)
+            # Fallback to keyword-based detection
+            return self._fallback_detection(current_message)
+    
+    def _fallback_detection(self, message: str) -> Tuple[bool, float, List[str]]:
+        """Fallback keyword-based scam detection"""
+        message_lower = message.lower()
+        
+        # Common scam keywords
+        scam_keywords = {
+            "account blocked": 0.8,
+            "account suspended": 0.8,
+            "verify immediately": 0.7,
+            "urgent action": 0.7,
+            "click here": 0.6,
+            "share otp": 0.9,
+            "share pin": 0.9,
+            "upi id": 0.7,
+            "bank account": 0.6,
+            "congratulations": 0.6,
+            "won prize": 0.7,
+            "refund": 0.5,
+            "expire": 0.6,
+            "suspend": 0.6,
+        }
+        
+        detected_indicators = []
+        max_confidence = 0.0
+        
+        for keyword, confidence in scam_keywords.items():
+            if keyword in message_lower:
+                detected_indicators.append(keyword)
+                max_confidence = max(max_confidence, confidence)
+        
+        is_scam = max_confidence >= 0.6
+        
+        return is_scam, max_confidence, detected_indicators
