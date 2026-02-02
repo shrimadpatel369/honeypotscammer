@@ -23,6 +23,9 @@ class Message(BaseModel):
     sender: SenderType
     text: str
     timestamp: datetime
+    
+    class Config:
+        extra = "allow"
 
 
 class Metadata(BaseModel):
@@ -30,6 +33,9 @@ class Metadata(BaseModel):
     channel: Optional[ChannelType] = ChannelType.SMS
     language: Optional[str] = "English"
     locale: Optional[str] = "IN"
+    
+    class Config:
+        extra = "allow"
 
 
 class HoneypotRequest(BaseModel):
@@ -41,11 +47,12 @@ class HoneypotRequest(BaseModel):
         description="Previous messages in the conversation"
     )
     metadata: Optional[Metadata] = Field(
-        default_factory=Metadata,
+        default=None,
         description="Additional context about the message"
     )
 
     class Config:
+        extra = "allow"
         json_schema_extra = {
             "example": {
                 "sessionId": "wertyu-dfghj-ertyui",
