@@ -70,17 +70,28 @@ git push -u origin main
    ```
    API_KEY=your-secret-api-key-here
    GEMINI_API_KEY=your-gemini-api-key-here
-   GEMINI_MODEL=gemini-2.0-flash-exp
+   GEMINI_MODEL=gemini-2.0-flash-thinking-exp
+   GEMINI_MAX_RETRIES=3
+   GEMINI_TIMEOUT=30
    MONGODB_URL=mongodb+srv://username:password@cluster.mongodb.net/
    MONGODB_DB_NAME=honeypot_db
+   MONGODB_MAX_POOL_SIZE=100
+   MONGODB_MIN_POOL_SIZE=10
    GUVI_CALLBACK_URL=https://hackathon.guvi.in/api/updateHoneyPotFinalResult
    ENV=production
    DEBUG=False
+   HOST=0.0.0.0
+   WORKERS=4
+   ENABLE_CACHING=True
+   CACHE_TTL=300
+   RATE_LIMIT_PER_MINUTE=100
    ```
 
-   **IMPORTANT**: Use Secret Manager for sensitive values:
-   - Click "Reference a secret"
-   - Create secrets for `API_KEY`, `GEMINI_API_KEY`, and `MONGODB_URL`
+   **IMPORTANT**: 
+   - **Do NOT set PORT** - Cloud Run automatically sets this (reserved variable)
+   - Use Secret Manager for `API_KEY`, `GEMINI_API_KEY`, and `MONGODB_URL`:
+     - Click "Reference a secret"
+     - Create secrets for sensitive values
 
 7. **Container Settings**
    - Port: `8000`

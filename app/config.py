@@ -1,5 +1,6 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import List
+import os
 
 
 class Settings(BaseSettings):
@@ -11,9 +12,9 @@ class Settings(BaseSettings):
     debug: bool = False
     api_key: str
     
-    # Server
+    # Server (PORT is auto-set by Cloud Run)
     host: str = "0.0.0.0"
-    port: int = 8000
+    port: int = int(os.environ.get("PORT", "8000"))  # Cloud Run sets PORT automatically
     workers: int = 4
     
     # MongoDB (Cloud Optimized)
