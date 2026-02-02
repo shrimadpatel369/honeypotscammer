@@ -18,12 +18,16 @@ from app.services.ai_agent import AIAgentService
 from app.services.intelligence_extractor import IntelligenceExtractorService
 from app.utils.callback import send_guvi_callback
 from app.cache import cache
+from app.logger import (
+    setup_logging,
+    log_request,
+    log_response,
+    log_error,
+    mask_sensitive_data
+)
 
 # Configure logging
-logging.basicConfig(
-    level=logging.INFO if not settings.debug else logging.DEBUG,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
+setup_logging(debug=settings.debug)
 logger = logging.getLogger(__name__)
 
 # Initialize rate limiter
@@ -77,11 +81,24 @@ app.add_middleware(
 # Request logging middleware
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
-    """Log all incoming requests"""
+    """Log all incoming requests with full details"""
     start_time = time.time()
+    request_id = f"req_{int(start_time * 1000)}"
     
-    # Log request
-    logger.info(f"Request: {request.method} {request.url.path}")
+    # Capture request details
+    path = request.url.path
+    method = request.method
+    client_ip = get_remote_address(request)
+    
+    # Get headers (mask sensitive data)
+    headers = dict(request.headers)
+    masked_headers = mask_sensitive_data(headers)
+    
+    # Log request start
+    logger.info(
+        f"Request START: {method} {path} | Client: {client_ip} | "
+        f"User-Agent: {headers.get('user-agent', 'unknown')}"
+    )
     
     try:
         response = await call_next(request)
@@ -89,14 +106,20 @@ async def log_requests(request: Request, call_next):
         
         # Log response
         logger.info(
-            f"Response: {request.method} {request.url.path} "
-            f"- Status: {response.status_code} - Time: {process_time:.3f}s"
+            f"Request END: {method} {path} | Status: {response.status_code} | "
+            f"Time: {process_time:.3f}s | Client: {client_ip}"
         )
         
         response.headers["X-Process-Time"] = str(process_time)
+        response.headers["X-Request-ID"] = request_id
         return response
     except Exception as e:
-        logger.error(f"Request failed: {request.method} {request.url.path} - Error: {str(e)}")
+        process_time = time.time() - start_time
+        logger.error(
+            f"Request FAILED: {method} {path} | Error: {str(e)} | "
+            f"Time: {process_time:.3f}s | Client: {client_ip}",
+            exc_info=True
+        )
         raise
 
 
@@ -176,14 +199,49 @@ async def honeypot_endpoint(request: Request, honeypot_request: HoneypotRequest)
     6. Sends final callback to GUVI when conversation completes
     
     Args:
-        request: HoneypotRequest with message and conversation history
+        request: FastAPI request object
+        honeypot_request: HoneypotRequest with message and conversation history
         
     Returns:
         HoneypotResponse with detection results and AI agent reply
     """
+    start_time = time.time()
+    session_id = honeypot_request.sessionId
+    
+    # Log incoming request with full details
+    logger.info("="*80)
+    logger.info(f"🔍 INCOMING TEST REQUEST - Session: {session_id}")
+    logger.info("="*80)
+    
+    # Log request headers (masked)
+    headers = dict(request.headers)
+    masked_headers = mask_sensitive_data(headers)
+    logger.info(f"Request Headers: {masked_headers}")
+    
+    # Log request body details
+    request_body = honeypot_request.model_dump()
+    logger.info(f"Session ID: {session_id}")
+    logger.info(f"Channel: {honeypot_request.metadata.channel if honeypot_request.metadata else 'Unknown'}")
+    logger.info(f"Language: {honeypot_request.metadata.language if honeypot_request.metadata else 'Unknown'}")
+    logger.info(f"Message Sender: {honeypot_request.message.sender}")
+    logger.info(f"Message Text: {honeypot_request.message.text}")
+    logger.info(f"Message Timestamp: {honeypot_request.message.timestamp}")
+    logger.info(f"Conversation History Length: {len(honeypot_request.conversationHistory)}")
+    
+    if honeypot_request.conversationHistory:
+        logger.info("Conversation History:")
+        for idx, msg in enumerate(honeypot_request.conversationHistory, 1):
+            logger.info(f"  [{idx}] {msg.sender}: {msg.text}")
+    
+    # Log structured request data
+    log_request(
+        session_id=session_id,
+        request_data=request_body,
+        masked_headers=masked_headers
+    )
+    
     try:
-        logger.info(f"Processing request for session: {honeypot_request.sessionId}")
-        start_time = time.time()
+        logger.info(f"📊 Processing request for session: {session_id}")
         
         # Initialize services
         scam_detector = ScamDetectorService()
@@ -307,8 +365,7 @@ async def honeypot_endpoint(request: Request, honeypot_request: HoneypotRequest)
         )
         
         # Calculate processing time
-        processing_time = time.time() - start_time
-        logger.info(f"Request processed in {processing_time:.3f}s for session {honeypot_request.sessionId}")
+        processing_time = (time.time() - start_time) * 1000  # Convert to milliseconds
         
         # Prepare response
         response = HoneypotResponse(
@@ -322,11 +379,51 @@ async def honeypot_endpoint(request: Request, honeypot_request: HoneypotRequest)
             agentNotes=session["agentNotes"].strip(" |")
         )
         
-        logger.info(f"Successfully processed request for session {honeypot_request.sessionId}")
+        # Log response details
+        logger.info("="*80)
+        logger.info(f"📤 OUTGOING RESPONSE - Session: {honeypot_request.sessionId}")
+        logger.info("="*80)
+        logger.info(f"Status: {response.status}")
+        logger.info(f"Scam Detected: {response.scamDetected}")
+        logger.info(f"Should Continue: {response.shouldContinue}")
+        logger.info(f"Agent Reply: {response.reply}")
+        logger.info(f"Total Messages: {response.engagementMetrics['totalMessagesExchanged']}")
+        logger.info(f"Duration: {response.engagementMetrics['engagementDurationSeconds']}s")
+        logger.info(f"Intelligence Extracted:")
+        logger.info(f"  - Bank Accounts: {len(response.extractedIntelligence['bankAccounts'])}")
+        logger.info(f"  - UPI IDs: {len(response.extractedIntelligence['upiIds'])}")
+        logger.info(f"  - Phishing Links: {len(response.extractedIntelligence['phishingLinks'])}")
+        logger.info(f"  - Phone Numbers: {len(response.extractedIntelligence['phoneNumbers'])}")
+        logger.info(f"  - Keywords: {len(response.extractedIntelligence['suspiciousKeywords'])}")
+        logger.info(f"Agent Notes: {response.agentNotes}")
+        logger.info(f"Processing Time: {processing_time:.2f}ms")
+        logger.info("="*80)
+        
+        # Log structured response data
+        log_response(
+            session_id=honeypot_request.sessionId,
+            response_data=response.model_dump(),
+            duration_ms=processing_time,
+            status_code=200
+        )
+        
+        logger.info(f"✅ Successfully processed request for session {honeypot_request.sessionId}")
         return response
         
     except Exception as e:
-        logger.error(f"Error processing honeypot request: {str(e)}", exc_info=True)
+        processing_time = (time.time() - start_time) * 1000
+        logger.error(f"❌ Error processing honeypot request for session {honeypot_request.sessionId}: {str(e)}", exc_info=True)
+        
+        # Log error details
+        log_error(
+            session_id=honeypot_request.sessionId,
+            error_message=str(e),
+            error_details={
+                "exception_type": type(e).__name__,
+                "duration_ms": processing_time
+            }
+        )
+        
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to process request: {str(e)}"

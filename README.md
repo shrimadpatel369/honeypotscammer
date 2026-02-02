@@ -287,17 +287,47 @@ gcloud run deploy honeypot-api \
 - ✅ Secure Environment Variables
 - ✅ MongoDB Connection Security
 
-## � Documentation
+## 📚 Documentation
 
-- **[Quick Start Guide](doc/QUICKSTART.md)** - Get started in 5 minutes- **[Premium Optimization Guide](doc/PREMIUM_OPTIMIZATION.md)** - Performance tuning and best practices- **[API Reference](doc/API_REFERENCE.md)** - Complete API documentation
+- **[Quick Start Guide](doc/QUICKSTART.md)** - Get started in 5 minutes
+- **[Premium Optimization Guide](doc/PREMIUM_OPTIMIZATION.md)** - Performance tuning and best practices
+- **[Logging System](doc/LOGGING.md)** - Complete logging documentation and troubleshooting
+- **[API Reference](doc/API_REFERENCE.md)** - Complete API documentation
 - **[Deployment Guide](doc/DEPLOYMENT.md)** - Google Cloud deployment instructions
 - **[API Docs (Interactive)](http://localhost:8000/docs)** - Swagger UI
 - **[Examples](examples/)** - Sample requests and test scripts
 
-## �📊 Monitoring & Logging
+## 📊 Monitoring & Logging
 
-The application includes:
-- Structured logging
+The application includes comprehensive logging:
+- **Three log files**: Application logs, request/response logs, and error logs
+- **Structured JSON**: All requests and responses logged in JSON format
+- **Complete tracking**: Every test request from the hackathon provider is logged
+- **GUVI callback logs**: Full payload and response tracking
+- **Performance metrics**: Processing time for each request
+- **Daily rotation**: New log files created automatically each day
+
+See [Logging Documentation](doc/LOGGING.md) for details.
+
+### Log Files Location
+```
+logs/
+├── app_YYYYMMDD.log      # Human-readable application logs
+├── requests_YYYYMMDD.log # JSON formatted request/response logs
+└── errors_YYYYMMDD.log   # Errors only
+```
+
+### View Logs
+```powershell
+# Real-time monitoring
+docker-compose logs -f api
+
+# View log files
+Get-Content logs\app_20260202.log -Tail 50
+
+# Search for specific session
+Select-String -Path logs\app_*.log -Pattern "session-123"
+```
 - Request/response logging
 - Error tracking
 - Performance metrics

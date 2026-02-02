@@ -41,7 +41,24 @@ async def send_guvi_callback(
             "agentNotes": agent_notes
         }
         
-        logger.info(f"Sending GUVI callback for session {session_id}")
+        logger.info("="*80)
+        logger.info(f"📡 SENDING GUVI CALLBACK - Session: {session_id}")
+        logger.info("="*80)
+        logger.info(f"Endpoint: {settings.guvi_callback_url}")
+        logger.info(f"Session ID: {session_id}")
+        logger.info(f"Scam Detected: {scam_detected}")
+        logger.info(f"Total Messages: {total_messages}")
+        logger.info(f"Intelligence Summary:")
+        logger.info(f"  - Bank Accounts: {len(payload['extractedIntelligence']['bankAccounts'])}")
+        logger.info(f"  - UPI IDs: {len(payload['extractedIntelligence']['upiIds'])}")
+        logger.info(f"  - Phishing Links: {len(payload['extractedIntelligence']['phishingLinks'])}")
+        logger.info(f"  - Phone Numbers: {len(payload['extractedIntelligence']['phoneNumbers'])}")
+        logger.info(f"  - Keywords: {len(payload['extractedIntelligence']['suspiciousKeywords'])}")
+        logger.info(f"Agent Notes: {agent_notes}")
+        logger.info("Full Payload:")
+        
+        import json
+        logger.info(json.dumps(payload, indent=2, ensure_ascii=False))
         logger.debug(f"Callback payload: {payload}")
         
         async with httpx.AsyncClient() as client:
@@ -54,19 +71,23 @@ async def send_guvi_callback(
                 }
             )
             
+            logger.info(f"GUVI Callback Response - Status: {response.status_code}")
+            logger.info(f"Response Body: {response.text}")
+            logger.info("="*80)
+            
             if response.status_code == 200:
-                logger.info(f"Successfully sent GUVI callback for session {session_id}")
+                logger.info(f"✅ Successfully sent GUVI callback for session {session_id}")
                 return True
             else:
                 logger.error(
-                    f"GUVI callback failed for session {session_id}: "
+                    f"❌ GUVI callback failed for session {session_id}: "
                     f"Status {response.status_code}, Response: {response.text}"
                 )
                 return False
                 
     except httpx.TimeoutException:
-        logger.error(f"GUVI callback timeout for session {session_id}")
+        logger.error(f"⏱️ GUVI callback timeout for session {session_id}")
         return False
     except Exception as e:
-        logger.error(f"Error sending GUVI callback for session {session_id}: {str(e)}", exc_info=True)
+        logger.error(f"❌ Error sending GUVI callback for session {session_id}: {str(e)}", exc_info=True)
         return False
