@@ -24,11 +24,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code
 COPY ./app ./app
 
-# Create logs directory
-RUN mkdir -p logs && chown -R appuser:appuser logs
-
 # Create non-root user for security
-RUN useradd -m -u 1000 appuser && \
+RUN useradd -m -u 1000 appuser
+
+# Create logs directory and set permissions
+RUN mkdir -p logs && \
     chown -R appuser:appuser /app
 
 # Switch to non-root user
