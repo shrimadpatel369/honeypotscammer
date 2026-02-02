@@ -181,6 +181,19 @@ async def health_check():
 
 
 @app.post(
+    "/api/message",
+    response_model=HoneypotResponse,
+    dependencies=[Depends(verify_api_key)]
+)
+@limiter.limit(f"{settings.rate_limit_per_minute}/minute")
+async def message_endpoint(request: Request, honeypot_request: HoneypotRequest):
+    """
+    Main endpoint for hackathon - accepts messages as per specification
+    """
+    return await honeypot_endpoint(request, honeypot_request)
+
+
+@app.post(
     "/api/v1/honeypot",
     response_model=HoneypotResponse,
     dependencies=[Depends(verify_api_key)]
