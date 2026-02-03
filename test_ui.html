@@ -436,6 +436,13 @@
             chatContainer.scrollTop = chatContainer.scrollHeight;
             
             try {
+                // Build conversation history in correct format
+                const historyForAPI = conversationHistory.map(msg => ({
+                    sender: msg.sender === 'agent' ? 'user' : 'scammer',
+                    text: msg.text,
+                    timestamp: new Date().toISOString()
+                }));
+                
                 // Call API - let AI detect the context automatically
                 const response = await fetch(`${API_BASE}/messages/incoming`, {
                     method: 'POST',
@@ -444,10 +451,14 @@
                     },
                     body: JSON.stringify({
                         sessionId: sessionId,
-                        text: message,
-                        sender: 'unknown',
+                        message: {
+                            sender: 'scammer',
+                            text: message,
+                            timestamp: new Date().toISOString()
+                        },
+                        conversationHistory: historyForAPI,
                         metadata: {
-                            channel: 'web_test',
+                            channel: 'Chat',
                             language: 'English',
                             locale: 'IN'
                         }
