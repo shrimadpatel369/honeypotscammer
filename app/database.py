@@ -80,6 +80,12 @@ async def init_indexes():
         await sessions_collection.create_index("status")
         await sessions_collection.create_index([("scamDetected", 1), ("status", 1)])
         
+        # Training examples indexes
+        training_collection = Database.get_database().training_examples
+        await training_collection.create_index("scam_type")
+        await training_collection.create_index("source")
+        await training_collection.create_index("created_at")
+        
         logger.info("Database indexes created successfully")
     except Exception as e:
         logger.error(f"Error creating indexes: {e}")

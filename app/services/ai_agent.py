@@ -1,5 +1,6 @@
 import google.generativeai as genai
 from app.config import settings
+from app.services.training_manager import training_manager
 import logging
 from typing import List, Dict, Any, Tuple
 import json
@@ -64,6 +65,24 @@ class AIAgentService:
             else:
                 persona = self.personas["elderly"]
             
+            # RAG: Get relevant training examples
+            scam_type = session_context.get('scamType')
+            training_examples = await training_manager.get_relevant_examples(
+                scam_type=scam_type,
+                limit=3
+            )
+            
+            # Build training examples context
+            examples_text = ""
+            if training_examples:
+                examples_text = "\n\n## LEARNED PATTERNS (use these as reference):\n"
+                for i, ex in enumerate(training_examples, 1):
+                    examples_text += f"Example {i}:\n"
+                    examples_text += f"  Scammer: {ex.get('scammer_message', '')[:80]}...\n"
+                    if 'effective_response' in ex:
+                        examples_text += f"  Good Response: {ex.get('effective_response', '')[:80]}...\n"
+                    examples_text += f"  Type: {ex.get('scam_type', 'unknown')}\n\n"
+            
             # Build conversation context
             context = "Conversation so far:\n"
             for msg in conversation_history[-10:]:  # Last 10 messages
@@ -88,6 +107,9 @@ YOUR PERSONA: {persona}
 Channel: {metadata.get('channel', 'SMS')}
 Language: {metadata.get('language', 'English')}
 Locale: {metadata.get('locale', 'IN')}
+Scam Type: {scam_type or 'unknown'}
+
+{examples_text}
 
 {context}
 

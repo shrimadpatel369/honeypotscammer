@@ -16,8 +16,10 @@ from app.auth import verify_api_key
 from app.services.scam_detector import ScamDetectorService
 from app.services.ai_agent import AIAgentService
 from app.services.intelligence_extractor import IntelligenceExtractorService
+from app.services.training_manager import training_manager
 from app.utils.callback import send_guvi_callback
 from app.cache import cache
+from app.routes import training
 from app.logger import (
     setup_logging,
     log_request,
@@ -76,6 +78,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Register training routes
+app.include_router(training.router)
 
 
 # Request logging middleware
@@ -382,6 +387,14 @@ async def honeypot_endpoint(request: Request, honeypot_request: HoneypotRequest)
         if not should_continue or session["totalMessages"] >= 30:  # Max 30 messages
             session["status"] = "completed"
             logger.info(f"Session {honeypot_request.sessionId} completed")
+            
+            # Auto-learn from successful session
+            if session["scamDetected"]:
+                try:
+                    await training_manager.learn_from_session(session)
+                    logger.info(f"🎓 Learning completed for session {honeypot_request.sessionId}")
+                except Exception as learn_error:
+                    logger.error(f"Learning error: {learn_error}")
             
             # Send final callback to GUVI
             if session["scamDetected"]:

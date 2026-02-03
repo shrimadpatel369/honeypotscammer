@@ -18,6 +18,9 @@ An AI-powered honeypot system that autonomously detects and engages with scammer
 - **Real-time Scam Detection**: AI-powered detection of fraudulent messages
 - **Autonomous AI Agent**: Multi-turn conversation handling with human-like responses
 - **Intelligence Extraction**: Automatic extraction of bank accounts, UPI IDs, phishing links, and more
+- **RAG-Based Learning**: Import Kaggle datasets and auto-learn from conversations
+- **Auto-Learning System**: Automatically improves from successful scam interactions
+- **Training API**: Easy import of CSV/JSON datasets for better AI responses
 - **Secure API**: API key authentication with rate limiting
 - **MongoDB Storage**: Persistent session and intelligence storage
 - **Google Gemini Integration**: Advanced AI capabilities for natural conversations
@@ -114,6 +117,19 @@ cp .env.example .env
 ```bash
 uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
+
+6. **Optional: Import training data**
+```bash
+# Test the training system
+.\examples\test_training.ps1
+
+# Import your Kaggle datasets
+curl -X POST "http://localhost:8000/training/import-csv" \
+    -H "X-API-Key: your-api-key" \
+    -F "file=@path/to/dataset.csv"
+```
+
+See **[RAG_SETUP.md](doc/RAG_SETUP.md)** for detailed training instructions.
 
 ### Docker Deployment
 
@@ -282,6 +298,39 @@ gcloud run deploy honeypot-api \
 - ✅ API Key Authentication
 - ✅ CORS Configuration
 - ✅ Request Validation
+- ✅ Rate Limiting (100 req/min)
+- ✅ Input Sanitization
+- ✅ Secure MongoDB Connection
+
+## 🎓 Training & Learning System
+
+The honeypot includes a **RAG (Retrieval-Augmented Generation)** system that:
+
+- ✅ **Import Kaggle datasets** (CSV/JSON) for training
+- ✅ **Auto-learns** from successful scam conversations
+- ✅ **Retrieves relevant examples** during AI response generation
+- ✅ **No fine-tuning needed** - works immediately
+- ✅ **Continuously improves** with each interaction
+
+### Quick Start with Training
+
+```powershell
+# Test the training system
+.\examples\test_training.ps1
+
+# Import a Kaggle dataset
+curl -X POST "http://localhost:8000/training/import-csv" \
+    -H "X-API-Key: your-api-key" \
+    -F "file=@examples/sample_scam_dataset.csv"
+
+# Check statistics
+curl -H "X-API-Key: your-api-key" \
+    http://localhost:8000/training/stats
+```
+
+**📖 See [RAG_SETUP.md](doc/RAG_SETUP.md) for complete training guide**
+
+## 📚 Documentation
 - ✅ Rate Limiting
 - ✅ Input Sanitization
 - ✅ Secure Environment Variables
