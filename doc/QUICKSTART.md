@@ -2,6 +2,14 @@
 
 Get your Honeypot API up and running in minutes!
 
+## 🌐 Live Demo & Testing
+
+**Production URL**: `https://honeypotscammer-136046240844.asia-south1.run.app`
+
+- **Test Frontend**: [https://honeypotscammer-136046240844.asia-south1.run.app](https://honeypotscammer-136046240844.asia-south1.run.app)
+- **API Documentation**: [https://honeypotscammer-136046240844.asia-south1.run.app/docs](https://honeypotscammer-136046240844.asia-south1.run.app/docs)
+- **API Base URL**: `https://honeypotscammer-136046240844.asia-south1.run.app/api/v1`
+
 ## 🚀 Quick Setup (5 minutes)
 
 ### 1. Clone the Repository
@@ -45,6 +53,11 @@ docker-compose logs -f api
 
 Your API is now running at: `http://localhost:8000`
 
+**Access Points**:
+- 🎨 **Test UI**: http://localhost:8000
+- 📖 **API Docs**: http://localhost:8000/docs
+- ❤️ **Health Check**: http://localhost:8000/health
+
 ### 3. Option B: Run Locally
 
 **Prerequisites**: Python 3.11+, MongoDB installed
@@ -71,9 +84,26 @@ uvicorn app.main:app --reload
 
 Your API is now running at: `http://localhost:8000`
 
+**Access Points**:
+- 🎨 **Test UI**: http://localhost:8000
+- 📖 **API Docs**: http://localhost:8000/docs
+- ❤️ **Health Check**: http://localhost:8000/health
+
 ## 📖 Test Your API
 
-### Using the Docs
+### Using the Web Interface
+The easiest way to test is using the built-in test UI:
+
+**Local**: Open http://localhost:8000 in your browser
+**Production**: Open https://honeypotscammer-136046240844.asia-south1.run.app
+
+Features:
+- 🎭 Select scam type and channel
+- ⚡ Use quick test messages
+- 💬 Chat with the AI agent in real-time
+- 📊 Track conversation statistics
+
+### Using the API Docs
 Open your browser: `http://localhost:8000/docs`
 
 ### Using PowerShell (Windows)

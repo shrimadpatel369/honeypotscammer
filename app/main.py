@@ -1,9 +1,11 @@
 from fastapi import FastAPI, Depends, HTTPException, status, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse, HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
 import logging
 import time
+from pathlib import Path
 
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
@@ -145,21 +147,16 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 # Routes
 @app.get("/")
-@limiter.limit(f"{settings.rate_limit_per_minute}/minute")
-async def root(request: Request):
-    """Root endpoint - health check"""
-    return {
-        "status": "online",
-        "service": settings.app_name,
-        "version": "2.0.0",
-        "environment": settings.env,
-        "model": settings.gemini_model,
-        "cache_enabled": settings.enable_caching
-    }
-
+async def root():
+    """Serve the test UI frontend"""
+    test_ui_path = Path(__file__).parent.parent / "test_ui.html"
+    if test_ui_path.exists():
+        return FileResponse(test_ui_path)
+    return {"message": "Honeypot API is running", "version": "2.0.0", "docs": "/docs"}
 
 @app.get("/health")
-async def health_check():
+@limiter.limit(f"{settings.rate_limit_per_minute}/minute")
+async def health_check(request: Request):
     """Detailed health check endpoint"""
     try:
         # Check database connection

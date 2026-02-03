@@ -1,6 +1,16 @@
 # 🍯 Agentic Honey-Pot for Scam Detection & Intelligence Extraction
 
-## 🌟 Premium Edition - Optimized for Minimum Latency
+## � Live Demo
+
+**🎨 Test Frontend**: [https://honeypotscammer-136046240844.asia-south1.run.app](https://honeypotscammer-136046240844.asia-south1.run.app)
+
+**📖 API Documentation**: [https://honeypotscammer-136046240844.asia-south1.run.app/docs](https://honeypotscammer-136046240844.asia-south1.run.app/docs)
+
+Try the interactive test UI to see the AI agent in action!
+
+---
+
+## �🌟 Premium Edition - Optimized for Minimum Latency
 
 An AI-powered honeypot system that autonomously detects and engages with scammers to extract actionable intelligence. Built with premium Google Cloud services and optimized for production-grade performance.
 
