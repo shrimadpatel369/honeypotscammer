@@ -1,9 +1,9 @@
 """Training API - Fast Kaggle Dataset Integration"""
-from fastapi import APIRouter, HTTPException, UploadFile, File
+from fastapi import APIRouter, HTTPException, UploadFile, File, Depends
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
 from app.services.training_manager import training_manager
-from app.auth import require_api_key
+from app.auth import verify_api_key
 import logging
 import tempfile
 import os
@@ -29,7 +29,7 @@ class BulkUpload(BaseModel):
 @router.post("/upload")
 async def upload_training_data(
     data: BulkUpload,
-    _: str = require_api_key
+    api_key: str = Depends(verify_api_key)
 ):
     """
     Upload training examples manually
@@ -63,7 +63,7 @@ async def upload_training_data(
 @router.post("/import-csv")
 async def import_csv(
     file: UploadFile = File(...),
-    _: str = require_api_key
+    api_key: str = Depends(verify_api_key)
 ):
     """
     Import Kaggle CSV dataset
@@ -104,7 +104,7 @@ async def import_csv(
 @router.post("/import-json")
 async def import_json(
     file: UploadFile = File(...),
-    _: str = require_api_key
+    api_key: str = Depends(verify_api_key)
 ):
     """
     Import Kaggle JSON dataset
@@ -140,7 +140,7 @@ async def import_json(
 
 
 @router.get("/stats")
-async def get_stats(_: str = require_api_key):
+async def get_stats(api_key: str = Depends(verify_api_key)):
     """
     Get training statistics
     
@@ -160,7 +160,7 @@ async def get_stats(_: str = require_api_key):
 async def get_examples(
     scam_type: Optional[str] = None,
     limit: int = 10,
-    _: str = require_api_key
+    api_key: str = Depends(verify_api_key)
 ):
     """View stored training examples"""
     try:
