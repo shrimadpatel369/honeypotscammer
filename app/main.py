@@ -213,6 +213,16 @@ async def message_endpoint(request: Request):
         )
 
 
+@app.post("/api/v1/messages/incoming")
+@limiter.limit(f"{settings.rate_limit_per_minute}/minute")
+async def messages_incoming(request: Request, honeypot_request: HoneypotRequest):
+    """
+    Simplified endpoint for frontend testing
+    Maps to the main honeypot endpoint
+    """
+    return await honeypot_endpoint(request, honeypot_request)
+
+
 @app.post(
     "/api/v1/honeypot",
     response_model=HoneypotResponse,

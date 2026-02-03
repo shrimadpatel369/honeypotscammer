@@ -97,6 +97,11 @@
         .btn-reset:hover {
             background: #c82333;
         }
+        .status-indicator {
+            font-size: 12px;
+            color: #667eea;
+            font-weight: 600;
+        }
         .chat-container {
             height: 450px;
             overflow-y: auto;
@@ -125,7 +130,7 @@
             from { opacity: 0; transform: translateY(10px); }
             to { opacity: 1; transform: translateY(0); }
         }
-        .message.scammer {
+        .message.sender {
             justify-content: flex-start;
         }
         .message.agent {
@@ -142,7 +147,7 @@
             margin-bottom: 5px;
             font-weight: 600;
         }
-        .message.scammer .message-label {
+        .message.sender .message-label {
             text-align: left;
         }
         .message.agent .message-label {
@@ -154,7 +159,7 @@
             word-wrap: break-word;
             line-height: 1.5;
         }
-        .message.scammer .message-bubble {
+        .message.sender .message-bubble {
             background: #fff;
             color: #333;
             border: 2px solid #e3f2fd;
@@ -296,41 +301,22 @@
             <div class="session-info-text">
                 Session ID: <span class="session-id" id="sessionId">-</span>
             </div>
-            <button class="btn-reset" onclick="resetSession()">🔄 New Session</button>
+            <div style="display: flex; gap: 10px; align-items: center;">
+                <div class="status-indicator">
+                    <span id="aiStatus">🤖 AI Ready</span>
+                </div>
+                <button class="btn-reset" onclick="resetSession()">🔄 New Session</button>
+            </div>
         </div>
         
-        <div class="controls">
-            <div class="control-group">
-                <label>🎭 Scam Type:</label>
-                <select id="scamType">
-                    <option value="bank_fraud">Bank Fraud</option>
-                    <option value="upi_scam">UPI Scam</option>
-                    <option value="technical_support">Technical Support</option>
-                    <option value="prize_lottery">Prize/Lottery</option>
-                    <option value="phishing">Phishing</option>
-                    <option value="job_scam">Job Scam</option>
-                    <option value="romance_scam">Romance Scam</option>
-                </select>
-            </div>
-            <div class="control-group">
-                <label>📱 Channel:</label>
-                <select id="channel">
-                    <option value="SMS">SMS</option>
-                    <option value="WhatsApp">WhatsApp</option>
-                    <option value="Telegram">Telegram</option>
-                    <option value="Email">Email</option>
-                </select>
-            </div>
-        </div>
-
         <div class="quick-messages">
-            <div class="quick-messages-label">⚡ Quick Test Messages:</div>
+            <div class="quick-messages-label">⚡ Test Scenarios (or type your own):</div>
             <div class="quick-message-buttons">
-                <button class="quick-msg-btn" onclick="useQuickMessage('Your bank account has been blocked. Click here to verify immediately.')">Bank Alert</button>
-                <button class="quick-msg-btn" onclick="useQuickMessage('You have won Rs 5,00,000! Send your details to claim prize.')">Lottery Win</button>
-                <button class="quick-msg-btn" onclick="useQuickMessage('Your KYC is not updated. Complete now or account will be suspended.')">KYC Alert</button>
-                <button class="quick-msg-btn" onclick="useQuickMessage('Dear customer, verify your UPI PIN for security update.')">UPI Scam</button>
-                <button class="quick-msg-btn" onclick="useQuickMessage('Microsoft support here. Your computer has virus. Call now.')">Tech Support</button>
+                <button class="quick-msg-btn" onclick="useQuickMessage('Your account has been compromised. Click here to secure it immediately.')">Security Alert</button>
+                <button class="quick-msg-btn" onclick="useQuickMessage('Congratulations! You have won ₹50,000. Send your bank details to claim.')">Prize Alert</button>
+                <button class="quick-msg-btn" onclick="useQuickMessage('Your KYC documents are incomplete. Update now to avoid account suspension.')">KYC Notice</button>
+                <button class="quick-msg-btn" onclick="useQuickMessage('Hi, I am calling from customer support. We need to verify your PIN.')">Support Call</button>
+                <button class="quick-msg-btn" onclick="useQuickMessage('Your computer has been infected with virus. Call this number immediately.')">Tech Alert</button>
             </div>
         </div>
         
@@ -342,7 +328,7 @@
             <input 
                 type="text" 
                 id="messageInput" 
-                placeholder="Type scammer message here... (or use quick messages above)"
+                placeholder="Type any message to test the AI honeypot..."
                 onkeypress="if(event.key==='Enter') sendMessage()"
                 autocomplete="off"
             >
@@ -427,12 +413,15 @@
                 await resetSession();
             }
             
+            // Update AI status
+            document.getElementById('aiStatus').textContent = '🧠 Analyzing...';
+            
             // Disable input
             input.disabled = true;
             document.getElementById('sendBtn').disabled = true;
             
-            // Add scammer message to UI
-            addMessage(message, 'scammer');
+            // Add sender message to UI
+            addMessage(message, 'sender');
             messageCount++;
             document.getElementById('messageCount').textContent = messageCount;
             input.value = '';
@@ -447,10 +436,7 @@
             chatContainer.scrollTop = chatContainer.scrollHeight;
             
             try {
-                // Call API
-                const scamType = document.getElementById('scamType').value;
-                const channel = document.getElementById('channel').value;
-                
+                // Call API - let AI detect the context automatically
                 const response = await fetch(`${API_BASE}/messages/incoming`, {
                     method: 'POST',
                     headers: {
@@ -459,10 +445,9 @@
                     body: JSON.stringify({
                         sessionId: sessionId,
                         text: message,
-                        sender: 'scammer',
+                        sender: 'unknown',
                         metadata: {
-                            channel: channel,
-                            scamType: scamType,
+                            channel: 'web_test',
                             language: 'English',
                             locale: 'IN'
                         }
@@ -486,23 +471,37 @@
                     
                     // Update conversation history
                     conversationHistory.push(
-                        { sender: 'scammer', text: message },
+                        { sender: 'sender', text: message },
                         { sender: 'agent', text: data.data.aiResponse }
                     );
                     
                     // Check if conversation should end
                     if (!data.data.shouldContinue) {
-                        addSystemMessage('⚠️ AI decided to end the conversation (detected end scenario)');
+                        addSystemMessage('🎯 CONVERSATION TERMINATED: AI detected sufficient intelligence extracted');
+                        addSystemMessage('📊 Intelligence gathered: ' + 
+                            JSON.stringify(data.data.extractedIntelligence || {}, null, 2));
+                        document.getElementById('aiStatus').textContent = '✅ Session Complete';
+                    } else {
+                        document.getElementById('aiStatus').textContent = '🤖 AI Ready';
                     }
+                    
+                    // Show detection results
+                    if (data.data.scamDetected) {
+                        addSystemMessage('⚠️ SCAM DETECTED: ' + data.data.scamType + ' (Confidence: ' + 
+                            Math.round(data.data.scamConfidence * 100) + '%)');
+                    }
+                    
                 } else {
                     addErrorMessage('API Error: ' + (data.message || 'Unknown error occurred'));
+                    document.getElementById('aiStatus').textContent = '❌ Error';
                 }
                 
             } catch (error) {
                 document.getElementById('loading')?.remove();
                 addErrorMessage('Connection Error: ' + error.message + 
-                    '<br><small>Make sure the API server is running on http://localhost:8000</small>');
+                    '<br><small>Make sure the API server is running on ' + API_BASE + '</small>');
                 console.error('Error:', error);
+                document.getElementById('aiStatus').textContent = '🔴 Offline';
             } finally {
                 // Re-enable input
                 input.disabled = false;
@@ -524,7 +523,7 @@
             const messageDiv = document.createElement('div');
             messageDiv.className = `message ${type}`;
             
-            const label = type === 'scammer' ? '🎣 Scammer' : '🤖 AI Agent';
+            const label = type === 'sender' ? '👤 Sender' : '🤖 AI Agent';
             const timestamp = new Date().toLocaleTimeString('en-US', { 
                 hour: '2-digit', 
                 minute: '2-digit' 
