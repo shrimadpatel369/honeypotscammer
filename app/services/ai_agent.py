@@ -29,22 +29,19 @@ class AIAgentService:
             "gemini-1.5-flash",          # Fallback fast
         ]
         
-        # Try to use the best available model
-        selected_model = settings.gemini_model
-        for model_name in self.supported_models:
-            try:
-                # Test if model is available and not deprecated
-                test_model = genai.GenerativeModel(model_name)
-                selected_model = model_name
-                logger.info(f"✅ Using supported model: {model_name}")
-                break
-            except Exception as e:
-                logger.debug(f"Model {model_name} not available: {e}")
-                continue
+        # Use configured model or first supported model (no testing during init to avoid timeout)
+        self.current_model = settings.gemini_model
+        
+        # Try to use a better model if configured one seems outdated
+        if self.current_model in ["gemini-pro", "gemini-1.0-pro"]:
+            logger.warning(f"⚠️ Configured model '{self.current_model}' is deprecated. Using gemini-1.5-pro instead.")
+            self.current_model = "gemini-1.5-pro"
+        
+        logger.info(f"✅ Initializing with model: {self.current_model}")
         
         # Use premium model with high creativity settings for natural conversation
         self.model = genai.GenerativeModel(
-            selected_model,
+            self.current_model,
             generation_config={
                 "temperature": 0.85,  # High temperature for very creative, human-like responses
                 "top_p": 0.95,
@@ -52,8 +49,6 @@ class AIAgentService:
                 "max_output_tokens": 1024,  # More room for natural, detailed responses
             }
         )
-        
-        self.current_model = selected_model
         
         # Multi-lingual support - language detection and natural responses
         self.supported_languages = {
