@@ -713,6 +713,13 @@ MAKE YOUR RESPONSE NATURAL, HUMAN-LIKE, AND STRATEGICALLY DESIGNED TO EXTRACT MA
                 prompt,
                 request_options={'timeout': settings.gemini_timeout}
             )
+            
+            # Check if response was blocked by safety filters
+            if not response.candidates or not response.candidates[0].content.parts:
+                logger.warning(f"Gemini response blocked by safety filters (finish_reason: {response.candidates[0].finish_reason if response.candidates else 'unknown'})")
+                # Use fallback response
+                return self._fallback_response(current_message, context_analysis["message_count"])
+            
             response_text = response.text.strip()
             
             # Parse JSON response with better error handling
@@ -773,11 +780,11 @@ MAKE YOUR RESPONSE NATURAL, HUMAN-LIKE, AND STRATEGICALLY DESIGNED TO EXTRACT MA
             logger.error(f"Failed to parse JSON from Gemini response: {e}")
             logger.error(f"Response text: {response_text}")
             # Fallback response
-            return self._fallback_response(current_message, message_count)
+            return self._fallback_response(current_message, context_analysis["message_count"])
         except Exception as e:
             logger.error(f"Error generating AI response: {str(e)}", exc_info=True)
             # Fallback response
-            return self._fallback_response(current_message, message_count)
+            return self._fallback_response(current_message, context_analysis["message_count"])
     
     def _fallback_response(self, message: str, message_count: int) -> Tuple[str, bool]:
         """Enhanced fallback response generation with human-like variety"""
