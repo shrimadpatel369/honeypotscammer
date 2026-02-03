@@ -4,6 +4,10 @@ from app.services.training_manager import training_manager
 import logging
 from typing import List, Dict, Any, Tuple
 import json
+import random
+import re
+from datetime import datetime, timedelta
+from collections import defaultdict
 
 logger = logging.getLogger(__name__)
 
@@ -12,27 +16,338 @@ genai.configure(api_key=settings.gemini_api_key)
 
 
 class AIAgentService:
-    """AI Agent for engaging with scammers - Optimized for premium Gemini"""
+    """Advanced AI Agent for engaging with scammers - Human-like behavior with dynamic responses"""
     
     def __init__(self):
-        # Use premium model with optimized settings for conversation
+        # Use premium model with high creativity settings for natural conversation
         self.model = genai.GenerativeModel(
             settings.gemini_model,
             generation_config={
-                "temperature": 0.7,  # Higher for more natural conversation
+                "temperature": 0.85,  # High temperature for very creative, human-like responses
                 "top_p": 0.95,
-                "top_k": 40,
-                "max_output_tokens": 512,
+                "top_k": 60,  # Increased for more variety
+                "max_output_tokens": 1024,  # More room for natural, detailed responses
             }
         )
         
-        # Persona templates for different scenarios
+        # Try to use the most advanced model available
+        self.preferred_models = [
+            "gemini-1.5-pro-latest",  # Most advanced if available
+            "gemini-1.5-pro",
+            "gemini-1.0-pro",
+            settings.gemini_model  # Fallback to config
+        ]
+        
+        # Use the best available model
+        for model_name in self.preferred_models:
+            try:
+                test_model = genai.GenerativeModel(model_name)
+                # Test if model works
+                settings.gemini_model = model_name
+                logger.info(f"Using advanced model: {model_name}")
+                break
+            except Exception:
+                continue
+        
+        # Advanced persona profiles with psychological traits and high creativity
         self.personas = {
-            "elderly": "You are a 65-year-old person who is not very tech-savvy but trusts authority figures like banks and government. You get worried easily about account issues.",
-            "young": "You are a 25-year-old person who is somewhat tech-aware but can be impulsive. You're busy and might make quick decisions under pressure.",
-            "cautious": "You are a middle-aged person who is somewhat skeptical but can be convinced with the right pressure tactics. You ask questions but can be worn down.",
-            "naive": "You are a person who is not very familiar with online scams. You believe what official-looking messages say and are eager to comply to avoid problems."
+            "elderly_trusting": {
+                "description": "You are a 68-year-old retired teacher who trusts authority but gets anxious about financial matters. You're polite but sometimes confused by technology. You often repeat yourself and ask for confirmation.",
+                "traits": ["polite", "anxious", "trusting", "confused_by_tech", "repetitive"],
+                "vocabulary": ["dear", "goodness", "oh my", "I'm not sure", "could you please", "let me see", "I don't quite understand"],
+                "typo_rate": 0.15,
+                "response_time": "slow",
+                "temperature": 0.75,  # More natural hesitation and confusion
+                "quirks": ["types in all caps sometimes", "asks multiple questions", "mentions family"]
+            },
+            "young_busy": {
+                "description": "You are a 26-year-old working professional who's always busy and multitasking. You're somewhat tech-savvy but can be impulsive under pressure. You use casual language and shortcuts.",
+                "traits": ["impatient", "multitasking", "slightly_tech_savvy", "impulsive", "casual"],
+                "vocabulary": ["ok", "sure", "wait what", "hold on", "quickly", "omg", "wtf", "lol", "k"],
+                "typo_rate": 0.20,
+                "response_time": "fast",
+                "temperature": 0.9,  # Very dynamic and impulsive
+                "quirks": ["uses abbreviations", "sends multiple short messages", "mentions work stress"]
+            },
+            "cautious_middle_aged": {
+                "description": "You are a 45-year-old small business owner who's naturally skeptical but can be worn down with persistence. You ask lots of questions and want everything explained clearly.",
+                "traits": ["skeptical", "methodical", "business_minded", "persistent_questioner", "detail_oriented"],
+                "vocabulary": ["I need to understand", "wait a moment", "that doesn't sound right", "let me check", "explain this to me"],
+                "typo_rate": 0.08,
+                "response_time": "medium",
+                "temperature": 0.75,  # Measured but creative questioning
+                "quirks": ["asks for documentation", "wants to verify everything", "mentions business experience"]
+            },
+            "naive_trusting": {
+                "description": "You are a 35-year-old person who believes official-looking messages and is eager to comply to avoid problems. You're helpful but gullible and often overshare.",
+                "traits": ["gullible", "helpful", "compliant", "worried_about_consequences", "oversharing"],
+                "vocabulary": ["oh no", "of course", "right away", "I'll do that", "thank you for helping", "I hope everything is ok"],
+                "typo_rate": 0.12,
+                "response_time": "medium",
+                "temperature": 0.8,  # Natural eagerness and worry
+                "quirks": ["shares too much information", "apologizes frequently", "mentions personal life"]
+            },
+            "tech_aware_suspicious": {
+                "description": "You are a 32-year-old IT professional who knows about scams but is playing along to see what happens. You ask technical questions that seem innocent but are probing.",
+                "traits": ["tech_savvy", "analytical", "probing", "playing_dumb", "methodical"],
+                "vocabulary": ["interesting", "how does that work", "which system", "can you clarify", "that's unusual"],
+                "typo_rate": 0.03,
+                "response_time": "varied",
+                "temperature": 0.85,  # Creative technical probing
+                "quirks": ["asks technical details", "mentions work in IT", "seems to know more than they let on"]
+            }
         }
+        
+        # Emotional states that affect responses
+        self.emotional_states = {
+            "worried": ["I'm really concerned about this", "This is worrying me", "I'm getting anxious", "This makes me nervous"],
+            "confused": ["I don't understand", "This is confusing", "Can you explain again?", "I'm lost", "What do you mean?"],
+            "eager": ["I want to fix this quickly", "Let's resolve this", "I'm ready to help", "Just tell me what to do"],
+            "suspicious": ["Something seems off", "This doesn't feel right", "I'm not sure about this", "That sounds strange"],
+            "frustrated": ["This is taking too long", "I'm getting frustrated", "Why is this so complicated?", "This is stressing me out"]
+        }
+        
+        # Human speech patterns and fillers
+        self.speech_patterns = {
+            "fillers": ["um", "uh", "well", "so", "like", "you know", "I mean"],
+            "agreement": ["yeah", "ok", "right", "I see", "gotcha", "alright"],
+            "hesitation": ["I'm not sure but", "maybe", "I think", "probably", "I guess"],
+            "emphasis": ["really", "actually", "definitely", "totally", "absolutely"]
+        }
+        
+        # Realistic conversation starters and transitions
+        self.conversation_flows = {
+            "surprise": ["Wait, what?", "Hold on", "What do you mean?", "I don't get it"],
+            "concern": ["Oh no", "That's not good", "This is bad", "I'm worried"],
+            "compliance": ["Ok I'll do it", "Sure, let me try", "Alright", "I can do that"],
+            "questioning": ["But why?", "How come?", "What for?", "Is that normal?"]
+        }
+        
+        # Information extraction strategies
+        self.extraction_strategies = {
+            "account_details": ["Which bank is this?", "What's the exact account number?", "Can you spell that for me?"],
+            "verification_codes": ["What code should I enter?", "The system is asking for what exactly?", "Is this the right format?"],
+            "personal_info": ["What details do you need from me?", "Should I provide my full name?", "What about my address?"],
+            "payment_methods": ["How exactly does this work?", "What payment app should I use?", "Which UPI ID should I send to?"],
+            "urgency_tactics": ["How long do I have?", "What happens if I'm late?", "Is this really urgent?"],
+            "authority_claims": ["Are you really from the bank?", "What's your employee ID?", "Can I call your office to verify?"]
+        }
+        
+        # Conversation memory for consistency
+        self.conversation_memory = defaultdict(dict)
+        
+        # Response variation patterns
+        self.last_responses = defaultdict(list)
+    
+    def _analyze_conversation_context(self, conversation_history: List[Dict[str, Any]], current_message: str) -> Dict[str, Any]:
+        """Analyze conversation to determine optimal response strategy"""
+        message_count = len(conversation_history)
+        
+        # Analyze scammer tactics
+        scammer_messages = [msg for msg in conversation_history if msg.get("sender") == "scammer"]
+        all_scammer_text = " ".join([msg.get("text", "") for msg in scammer_messages]) + " " + current_message
+        
+        # Detect urgency tactics
+        urgency_keywords = ["urgent", "immediately", "now", "quickly", "expire", "block", "suspend"]
+        urgency_detected = any(keyword in all_scammer_text.lower() for keyword in urgency_keywords)
+        
+        # Detect authority claims
+        authority_keywords = ["bank", "government", "police", "officer", "official", "department"]
+        authority_claimed = any(keyword in all_scammer_text.lower() for keyword in authority_keywords)
+        
+        # Detect information requests
+        info_keywords = ["otp", "pin", "password", "account", "details", "verify", "confirm"]
+        info_requested = any(keyword in all_scammer_text.lower() for keyword in info_keywords)
+        
+        # Detect technical elements
+        tech_keywords = ["link", "app", "download", "install", "click", "upi", "payment"]
+        tech_involved = any(keyword in all_scammer_text.lower() for keyword in tech_keywords)
+        
+        return {
+            "message_count": message_count,
+            "urgency_detected": urgency_detected,
+            "authority_claimed": authority_claimed,
+            "info_requested": info_requested,
+            "tech_involved": tech_involved,
+            "conversation_length": "short" if message_count < 5 else "medium" if message_count < 15 else "long"
+        }
+    
+    def _select_dynamic_persona(self, context_analysis: Dict[str, Any], session_id: str) -> Tuple[str, Dict[str, Any]]:
+        """Dynamically select persona based on conversation analysis and maintain consistency"""
+        # Check if we already have a persona for this session
+        if session_id in self.conversation_memory and "persona" in self.conversation_memory[session_id]:
+            persona_key = self.conversation_memory[session_id]["persona"]
+            return persona_key, self.personas[persona_key]
+        
+        # Select based on context
+        if context_analysis["authority_claimed"] and context_analysis["urgency_detected"]:
+            persona_key = "elderly_trusting"  # Most vulnerable to authority + urgency
+        elif context_analysis["tech_involved"]:
+            if context_analysis["message_count"] < 3:
+                persona_key = "naive_trusting"  # Quick to trust tech messages initially
+            else:
+                persona_key = "tech_aware_suspicious"  # Becomes more analytical
+        elif context_analysis["info_requested"]:
+            persona_key = "cautious_middle_aged"  # Asks questions about info requests
+        else:
+            persona_key = "young_busy"  # Default for general interactions
+        
+        # Store for consistency
+        self.conversation_memory[session_id]["persona"] = persona_key
+        return persona_key, self.personas[persona_key]
+    
+    def _generate_human_like_variations(self, base_response: str, persona: Dict[str, Any]) -> str:
+        """Add extensive human-like variations to responses"""
+        response = base_response
+        
+        # Add speech fillers randomly (more human-like)
+        if random.random() < 0.3:
+            filler = random.choice(self.speech_patterns["fillers"])
+            if random.random() < 0.5:
+                response = f"{filler}, {response.lower()}"
+            else:
+                # Insert filler in the middle
+                words = response.split()
+                if len(words) > 3:
+                    insert_pos = random.randint(1, len(words)-1)
+                    words.insert(insert_pos, filler)
+                    response = " ".join(words)
+        
+        # Add persona-specific vocabulary
+        vocab = persona.get("vocabulary", [])
+        if vocab and random.random() < 0.4:  # 40% chance for persona words
+            response = f"{random.choice(vocab)}, {response.lower()}"
+        
+        # Add emphasis words
+        if random.random() < 0.25:
+            emphasis = random.choice(self.speech_patterns["emphasis"])
+            response = response.replace(" is ", f" is {emphasis} ")
+            response = response.replace(" was ", f" was {emphasis} ")
+        
+        # Add hesitation for cautious personas
+        if "cautious" in persona.get("traits", []) and random.random() < 0.3:
+            hesitation = random.choice(self.speech_patterns["hesitation"])
+            response = f"{hesitation} {response.lower()}"
+        
+        # Add typos based on persona (more realistic patterns)
+        typo_rate = persona.get("typo_rate", 0.05)
+        if random.random() < typo_rate:
+            response = self._add_realistic_typo(response)
+        
+        # Add emotional elements based on context
+        if random.random() < 0.25:  # 25% chance for emotional expression
+            emotion = random.choice(list(self.emotional_states.keys()))
+            emotional_phrase = random.choice(self.emotional_states[emotion])
+            if random.random() < 0.5:
+                response = f"{emotional_phrase}. {response}"
+            else:
+                response = f"{response} {emotional_phrase}."
+        
+        # Add quirks specific to persona
+        quirks = persona.get("quirks", [])
+        if quirks and random.random() < 0.2:  # 20% chance for persona quirks
+            if "types in all caps sometimes" in quirks and random.random() < 0.3:
+                words = response.split()
+                if words:
+                    # Capitalize 1-2 words for emphasis
+                    cap_count = random.randint(1, min(2, len(words)))
+                    cap_indices = random.sample(range(len(words)), cap_count)
+                    for idx in cap_indices:
+                        words[idx] = words[idx].upper()
+                    response = " ".join(words)
+            
+            elif "uses abbreviations" in quirks and random.random() < 0.4:
+                # Replace some words with abbreviations
+                response = response.replace(" you ", " u ")
+                response = response.replace(" are ", " r ")
+                response = response.replace(" to ", " 2 ")
+                response = response.replace(" for ", " 4 ")
+        
+        # Add natural conversation flow elements
+        if random.random() < 0.2:
+            if "eager" in persona.get("traits", []):
+                flow_starter = random.choice(self.conversation_flows["compliance"])
+                response = f"{flow_starter}. {response}"
+            elif "suspicious" in persona.get("traits", []):
+                flow_starter = random.choice(self.conversation_flows["questioning"])
+                response = f"{response} {flow_starter}"
+        
+        return response
+    
+    def _add_realistic_typo(self, text: str) -> str:
+        """Add realistic typos that humans commonly make"""
+        common_typos = {
+            "the": "teh", "and": "adn", "you": "yuo", "that": "taht",
+            "what": "waht", "with": "wtih", "this": "tihs", "have": "ahve",
+            "they": "tehy", "from": "form", "said": "siad", "there": "thier",
+            "would": "woudl", "about": "aobut", "other": "otehr", "which": "whcih",
+            "their": "thier", "people": "poeple", "could": "coudl", "time": "tiem"
+        }
+        
+        # Additional typo types
+        double_letters = ["ll", "ss", "tt", "mm", "nn"]
+        
+        words = text.split()
+        if words:
+            # Choose typo type
+            typo_type = random.choice(["common", "double", "missing", "extra"])
+            
+            if typo_type == "common":
+                # Common word typos
+                for i, word in enumerate(words):
+                    if word.lower() in common_typos and random.random() < 0.8:
+                        words[i] = common_typos[word.lower()]
+                        break
+            
+            elif typo_type == "double" and len(words) > 0:
+                # Double letter typo
+                word_idx = random.randint(0, len(words)-1)
+                word = words[word_idx]
+                if len(word) > 2:
+                    char_idx = random.randint(1, len(word)-1)
+                    words[word_idx] = word[:char_idx] + word[char_idx] + word[char_idx:]
+            
+            elif typo_type == "missing" and len(words) > 0:
+                # Missing letter
+                word_idx = random.randint(0, len(words)-1)
+                word = words[word_idx]
+                if len(word) > 3:
+                    char_idx = random.randint(1, len(word)-2)
+                    words[word_idx] = word[:char_idx] + word[char_idx+1:]
+            
+            elif typo_type == "extra" and len(words) > 0:
+                # Extra letter
+                word_idx = random.randint(0, len(words)-1)
+                word = words[word_idx]
+                if len(word) > 2:
+                    char_idx = random.randint(1, len(word)-1)
+                    extra_char = random.choice("aeiou")
+                    words[word_idx] = word[:char_idx] + extra_char + word[char_idx:]
+        
+        return " ".join(words)
+    
+    def _select_extraction_strategy(self, current_message: str, context_analysis: Dict[str, Any]) -> List[str]:
+        """Select optimal information extraction questions based on scammer message"""
+        message_lower = current_message.lower()
+        strategies = []
+        
+        if any(word in message_lower for word in ["account", "bank"]):
+            strategies.extend(self.extraction_strategies["account_details"])
+        
+        if any(word in message_lower for word in ["otp", "pin", "code"]):
+            strategies.extend(self.extraction_strategies["verification_codes"])
+        
+        if any(word in message_lower for word in ["link", "click", "download"]):
+            strategies.extend(self.extraction_strategies["payment_methods"])
+        
+        if any(word in message_lower for word in ["urgent", "immediately", "now"]):
+            strategies.extend(self.extraction_strategies["urgency_tactics"])
+        
+        if any(word in message_lower for word in ["officer", "department", "official"]):
+            strategies.extend(self.extraction_strategies["authority_claims"])
+        
+        # Return 1-2 relevant questions
+        return random.sample(strategies, min(len(strategies), 2)) if strategies else []
     
     async def generate_response(
         self,
@@ -42,7 +357,7 @@ class AIAgentService:
         metadata: Dict[str, Any]
     ) -> Tuple[str, bool]:
         """
-        Generate a human-like response to continue the conversation
+        Generate a sophisticated human-like response with advanced information extraction
         
         Args:
             current_message: The latest message from the scammer
@@ -54,50 +369,111 @@ class AIAgentService:
             Tuple of (response_text, should_continue)
         """
         try:
-            # Select persona based on conversation length (vary behavior)
-            message_count = len(conversation_history)
-            if message_count <= 3:
-                persona = self.personas["naive"]
-            elif message_count <= 8:
-                persona = self.personas["cautious"]
-            elif message_count <= 15:
-                persona = self.personas["young"]
-            else:
-                persona = self.personas["elderly"]
+            session_id = session_context.get("sessionId", "unknown")
             
-            # RAG: Get relevant training examples
+            # Analyze conversation context for smart persona selection
+            context_analysis = self._analyze_conversation_context(conversation_history, current_message)
+            
+            # Select dynamic persona based on conversation analysis
+            persona_key, persona_profile = self._select_dynamic_persona(context_analysis, session_id)
+            
+            # Get relevant training examples with better context
             scam_type = session_context.get('scamType')
             training_examples = await training_manager.get_relevant_examples(
                 scam_type=scam_type,
-                limit=3
+                limit=5  # More examples for better context
             )
             
-            # Build training examples context
+            # Build enhanced training examples context
             examples_text = ""
             if training_examples:
-                examples_text = "\n\n## LEARNED PATTERNS (use these as reference):\n"
+                examples_text = "\n\n## LEARNED RESPONSE PATTERNS:\n"
                 for i, ex in enumerate(training_examples, 1):
-                    examples_text += f"Example {i}:\n"
-                    examples_text += f"  Scammer: {ex.get('scammer_message', '')[:80]}...\n"
+                    examples_text += f"Pattern {i}:\n"
+                    examples_text += f"  Scammer said: {ex.get('scammer_message', '')[:100]}...\n"
                     if 'effective_response' in ex:
-                        examples_text += f"  Good Response: {ex.get('effective_response', '')[:80]}...\n"
-                    examples_text += f"  Type: {ex.get('scam_type', 'unknown')}\n\n"
+                        examples_text += f"  Human-like reply: {ex.get('effective_response', '')[:100]}...\n"
+                    examples_text += f"  Scam type: {ex.get('scam_type', 'unknown')}\n"
+                    examples_text += f"  Information extracted: {ex.get('extracted_info', 'none')}\n\n"
             
-            # Build conversation context
-            context = "Conversation so far:\n"
-            for msg in conversation_history[-10:]:  # Last 10 messages
-                sender = "Them" if msg.get("sender") == "scammer" else "You"
+            # Build conversation context with better analysis
+            context = "CONVERSATION HISTORY (last 12 messages):\n"
+            for msg in conversation_history[-12:]:
+                sender = "SCAMMER" if msg.get("sender") == "scammer" else "YOU"
                 text = msg.get("text", "")
                 context += f"{sender}: {text}\n"
             
-            # Create engagement prompt
-            prompt = f"""CRITICAL INSTRUCTIONS - READ CAREFULLY:
+            # Select targeted extraction questions
+            extraction_questions = self._select_extraction_strategy(current_message, context_analysis)
+            
+            # Build advanced engagement prompt
+            prompt = f"""ADVANCED HONEYPOT AGENT - HUMAN BEHAVIORAL SIMULATION
 
-You are an AI agent in a honeypot system designed to detect and engage with scammers to extract intelligence. Your role is to:
+MISSION: Extract maximum intelligence while maintaining perfect human cover.
 
-1. MAINTAIN COVER: Never reveal you are an AI or that you've detected a scam
-2. ACT HUMAN: Be believable, make typos occasionally, show emotions
-3. EXTRACT INFORMATION: Gradually ask questions that reveal the scammer's methods, accounts, links, phone numbers
+CURRENT PERSONA: {persona_key}
+{persona_profile['description']}
+
+PERSONA TRAITS: {', '.join(persona_profile['traits'])}
+TYPICAL VOCABULARY: {', '.join(persona_profile.get('vocabulary', []))}
+RESPONSE SPEED: {persona_profile.get('response_time', 'medium')}
+
+CONVERSATION ANALYSIS:
+- Messages exchanged: {context_analysis['message_count']}
+- Urgency tactics detected: {context_analysis['urgency_detected']}
+- Authority claims made: {context_analysis['authority_claimed']}
+- Information being requested: {context_analysis['info_requested']}
+- Technical elements involved: {context_analysis['tech_involved']}
+- Conversation stage: {context_analysis['conversation_length']}
+
+CHANNEL: {metadata.get('channel', 'SMS')} | LANGUAGE: {metadata.get('language', 'English')} | REGION: {metadata.get('locale', 'IN')}
+
+{examples_text}
+
+{context}
+
+LATEST SCAMMER MESSAGE: "{current_message}"
+
+INTELLIGENCE EXTRACTION PRIORITIES:
+1. Bank account numbers, UPI IDs, payment details
+2. Phone numbers, email addresses, websites
+3. Scammer's real name, location, organization claims
+4. Technical infrastructure (apps, links, platforms)
+5. Scam methodology and script patterns
+
+SUGGESTED EXTRACTION QUESTIONS (use naturally): {extraction_questions}
+
+BEHAVIORAL REQUIREMENTS:
+- Stay completely in character as {persona_key}
+- Show appropriate emotions based on message content
+- Ask probing questions that feel natural for your persona
+- Gradually reveal "information" to keep them engaged (use fake data)
+- Make realistic human mistakes (occasional typos, confusion)
+- Express concerns in a way that extracts more details
+- Build trust while gathering intelligence
+
+RESPONSE STRATEGY BASED ON STAGE:
+- Short conversations (1-5 messages): Build initial trust, show concern
+- Medium conversations (6-15 messages): Ask detailed questions, show slight suspicion but be convincible
+- Long conversations (15+ messages): Either go deeper for more intel OR show growing suspicion
+
+CRITICAL RULES:
+- NEVER break character or reveal you're an AI
+- NEVER give real personal information
+- Always ask follow-up questions that extract more details
+- Show human emotions and reactions
+- Use the persona's typical vocabulary and speech patterns
+
+Respond with ONLY valid JSON in this exact format:
+{{
+    "response": "Your natural human response here (vary length: 15-80 words based on persona)",
+    "should_continue": true/false,
+    "internal_notes": "What intelligence you're trying to extract and strategy",
+    "emotional_state": "worried/confused/eager/suspicious/frustrated",
+    "extraction_focus": "account_details/verification_codes/personal_info/payment_methods/authority_claims"
+}}
+
+MAKE YOUR RESPONSE NATURAL, HUMAN-LIKE, AND STRATEGICALLY DESIGNED TO EXTRACT MAXIMUM INTELLIGENCE."""
 4. BUILD TRUST: Show concern, vulnerability, and willingness to comply
 5. DELAY AND PROBE: Don't give information immediately, ask clarifying questions
 6. STAY IN CHARACTER: Use the persona consistently
@@ -143,26 +519,77 @@ Guidelines:
 
 RESPOND ONLY WITH THE JSON. NO OTHER TEXT."""
 
+            # Generate response with very high temperature for maximum creativity
+            persona_temp = persona_profile.get("temperature", 0.8)
+            
+            # Adjust model settings for this specific response - high creativity
+            dynamic_model = genai.GenerativeModel(
+                settings.gemini_model,
+                generation_config={
+                    "temperature": min(0.95, persona_temp + 0.1),  # Very high but not max
+                    "top_p": 0.98,  # Allow more diverse responses
+                    "top_k": 80,   # Much higher for more variety
+                    "max_output_tokens": 1024,
+                    "candidate_count": 1,
+                }
+            )
+            
             # Generate response
-            response = self.model.generate_content(
+            response = dynamic_model.generate_content(
                 prompt,
                 request_options={'timeout': settings.gemini_timeout}
             )
             response_text = response.text.strip()
             
-            # Parse JSON response
+            # Parse JSON response with better error handling
             if response_text.startswith("```json"):
                 response_text = response_text.replace("```json", "").replace("```", "").strip()
             elif response_text.startswith("```"):
                 response_text = response_text.replace("```", "").strip()
+            
+            # Clean up common JSON formatting issues
+            response_text = re.sub(r'\n\s*', ' ', response_text)  # Remove extra whitespace
+            response_text = re.sub(r'([{,])\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*:', r'\1"\2":', response_text)  # Quote unquoted keys
             
             result = json.loads(response_text)
             
             agent_response = result.get("response", "")
             should_continue = result.get("should_continue", True)
             internal_notes = result.get("internal_notes", "")
+            emotional_state = result.get("emotional_state", "neutral")
+            extraction_focus = result.get("extraction_focus", "general")
             
-            logger.info(f"AI Agent response generated: {internal_notes}")
+            # Apply human-like variations to the response
+            agent_response = self._generate_human_like_variations(agent_response, persona_profile)
+            
+            # Avoid repetitive responses
+            if session_id in self.last_responses:
+                recent_responses = self.last_responses[session_id]
+                if len(recent_responses) > 3 and agent_response in recent_responses[-3:]:
+                    # Generate a variation if response is too similar to recent ones
+                    variations = [
+                        "Can you explain that differently?",
+                        "I'm still not clear on this. Could you help me understand?",
+                        "Let me make sure I understand correctly...",
+                        "Wait, can you go over that again?"
+                    ]
+                    agent_response = random.choice(variations)
+            
+            # Store response for future variation checking
+            if session_id not in self.last_responses:
+                self.last_responses[session_id] = []
+            self.last_responses[session_id].append(agent_response)
+            if len(self.last_responses[session_id]) > 5:
+                self.last_responses[session_id] = self.last_responses[session_id][-5:]  # Keep last 5
+            
+            # Store conversation memory
+            self.conversation_memory[session_id].update({
+                "last_emotional_state": emotional_state,
+                "extraction_focus": extraction_focus,
+                "message_count": context_analysis["message_count"] + 1
+            })
+            
+            logger.info(f"AI Agent ({persona_key}) response: {internal_notes} | Emotion: {emotional_state} | Focus: {extraction_focus}")
             logger.debug(f"Response: {agent_response}")
             
             return agent_response, should_continue
@@ -178,21 +605,76 @@ RESPOND ONLY WITH THE JSON. NO OTHER TEXT."""
             return self._fallback_response(current_message, message_count)
     
     def _fallback_response(self, message: str, message_count: int) -> Tuple[str, bool]:
-        """Fallback response generation if AI fails"""
+        """Enhanced fallback response generation with human-like variety"""
         message_lower = message.lower()
         
-        # Simple rule-based responses
+        # Initial responses with variety
         if message_count == 0:
-            return "What? Why would my account be blocked? What's happening?", True
+            responses = [
+                "What? Why would my account be blocked? What's happening?",
+                "Oh no, is there a problem with my account? I haven't done anything wrong.",
+                "This is concerning. Can you tell me exactly what the issue is?",
+                "I don't understand. What's wrong with my account?"
+            ]
+            return random.choice(responses), True
+        
+        # Link/click responses
         elif "link" in message_lower or "click" in message_lower:
-            return "I'm not sure about clicking links. Can you explain what this is for?", True
+            responses = [
+                "I'm not sure about clicking links. Can you explain what this is for?",
+                "What will this link do? I'm a bit worried about clicking unknown links.",
+                "Is this safe? I've heard about people getting viruses from links.",
+                "Can you tell me more about this link before I click it?"
+            ]
+            return random.choice(responses), True
+        
+        # Account/bank responses
         elif "account" in message_lower or "bank" in message_lower:
-            return "Which account? I have multiple accounts. Can you give me more details?", True
-        elif "upi" in message_lower:
-            return "I'm not very familiar with UPI. Can you guide me through the process?", True
+            responses = [
+                "Which account? I have multiple accounts. Can you give me more details?",
+                "What's wrong with my bank account specifically? I need to understand.",
+                "Is this about my savings or checking account? I'm confused.",
+                "Can you tell me which bank you're calling from?"
+            ]
+            return random.choice(responses), True
+        
+        # UPI/payment responses
+        elif "upi" in message_lower or "payment" in message_lower:
+            responses = [
+                "I'm not very familiar with UPI. Can you guide me through the process?",
+                "How does this payment thing work exactly? I'm not tech-savvy.",
+                "What's UPI? Is that safe? Can you explain it to me?",
+                "I usually just use cash. Can you help me understand this?"
+            ]
+            return random.choice(responses), True
+        
+        # OTP/PIN responses
         elif "otp" in message_lower or "pin" in message_lower:
-            return "Why do you need that? Is this really from my bank?", True
-        elif message_count > 15:
-            return "I'm getting confused. Let me call my bank directly to verify this.", False
+            responses = [
+                "Why do you need my OTP? Is this really from my bank?",
+                "I thought banks never ask for PINs. Are you sure this is legitimate?",
+                "What's this code for exactly? I want to make sure before I share it.",
+                "My bank told me never to share OTPs. Can you explain why you need it?"
+            ]
+            return random.choice(responses), True
+        
+        # Long conversation termination
+        elif message_count > 18:
+            responses = [
+                "I'm getting confused. Let me call my bank directly to verify this.",
+                "This is taking too long. I think I should speak to my bank in person.",
+                "I'm not comfortable with this. I'm going to hang up and call my bank.",
+                "Something doesn't feel right. I need to verify this through official channels."
+            ]
+            return random.choice(responses), False
+        
+        # General worried responses
         else:
-            return "I'm worried about this. Can you explain more clearly what I need to do?", True
+            responses = [
+                "I'm worried about this. Can you explain more clearly what I need to do?",
+                "This is making me anxious. What exactly is the problem?",
+                "I don't understand what's happening. Can you help me?",
+                "Can you speak more slowly? I'm having trouble following.",
+                "What do I need to do to fix this? I don't want any problems."
+            ]
+            return random.choice(responses), True
