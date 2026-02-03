@@ -717,8 +717,8 @@ MAKE YOUR RESPONSE NATURAL, HUMAN-LIKE, AND STRATEGICALLY DESIGNED TO EXTRACT MA
             # Check if response was blocked by safety filters
             if not response.candidates or not response.candidates[0].content.parts:
                 logger.warning(f"Gemini response blocked by safety filters (finish_reason: {response.candidates[0].finish_reason if response.candidates else 'unknown'})")
-                # Use fallback response
-                return self._fallback_response(current_message, context_analysis["message_count"])
+                # Use fallback response with proper language support
+                return self._fallback_response(current_message, context_analysis["message_count"], detected_language, persona_profile)
             
             response_text = response.text.strip()
             
@@ -746,15 +746,29 @@ MAKE YOUR RESPONSE NATURAL, HUMAN-LIKE, AND STRATEGICALLY DESIGNED TO EXTRACT MA
             # Avoid repetitive responses
             if session_id in self.last_responses:
                 recent_responses = self.last_responses[session_id]
-                if len(recent_responses) > 3 and agent_response in recent_responses[-3:]:
-                    # Generate a variation if response is too similar to recent ones
-                    variations = [
-                        "Can you explain that differently?",
-                        "I'm still not clear on this. Could you help me understand?",
-                        "Let me make sure I understand correctly...",
-                        "Wait, can you go over that again?"
-                    ]
+                # Check for exact or very similar responses
+                response_lower = agent_response.lower()
+                is_repetitive = any(response_lower == prev.lower() for prev in recent_responses[-3:])
+                
+                if is_repetitive:
+                    # Generate a much more varied response based on message context
+                    if detected_language == "hindi":
+                        variations = [
+                            "समझ नहीं आया, कुछ और बताइए?",
+                            "ये क्या बात हुई? मुझे पूरी तरह समझाइए",
+                            "अरे रुको, ये फिर से समझाओ",
+                            "थोड़ा आसान भाषा में बताओ ना"
+                        ]
+                    else:
+                        variations = [
+                            "Sorry, what do you mean exactly?",
+                            "I'm not following. Can you be more specific?",
+                            "Hold on, explain that again?",
+                            "That's confusing me. Tell me in simpler terms?",
+                            f"Wait what? Are you saying {current_message[:30]}...? I don't get it"
+                        ]
                     agent_response = random.choice(variations)
+                    logger.info(f"🔄 Detected repetition, using variation: {agent_response}")
             
             # Store response for future variation checking
             if session_id not in self.last_responses:
@@ -779,16 +793,52 @@ MAKE YOUR RESPONSE NATURAL, HUMAN-LIKE, AND STRATEGICALLY DESIGNED TO EXTRACT MA
         except json.JSONDecodeError as e:
             logger.error(f"Failed to parse JSON from Gemini response: {e}")
             logger.error(f"Response text: {response_text}")
-            # Fallback response
-            return self._fallback_response(current_message, context_analysis["message_count"])
+            # Try to extract plain text response from malformed JSON
+            try:
+                # Sometimes Gemini returns just the response without JSON wrapper
+                if response_text and len(response_text) > 10:
+                    # Use the raw text as response
+                    agent_response = self._generate_human_like_variations(response_text[:200], persona_profile, detected_language)
+                    logger.info(f"🔧 Using raw response after JSON parse failure: {agent_response}")
+                    return agent_response, True
+            except:
+                pass
+            # Final fallback
+            return self._fallback_response(current_message, context_analysis["message_count"], detected_language, persona_profile)
         except Exception as e:
             logger.error(f"Error generating AI response: {str(e)}", exc_info=True)
             # Fallback response
-            return self._fallback_response(current_message, context_analysis["message_count"])
+            return self._fallback_response(current_message, context_analysis["message_count"], detected_language, persona_profile)
     
-    def _fallback_response(self, message: str, message_count: int) -> Tuple[str, bool]:
-        """Enhanced fallback response generation with human-like variety"""
+    def _fallback_response(self, message: str, message_count: int, language: str = "english", persona: Dict[str, Any] = None) -> Tuple[str, bool]:
+        """Enhanced fallback response generation with human-like variety and multi-language support"""
         message_lower = message.lower()
+        
+        # Hindi responses for Hindi input
+        if language == "hindi":
+            if message_count == 0:
+                responses = [
+                    "क्या? मेरा अकाउंट क्यों ब्लॉक हो गया? क्या हुआ?",
+                    "अरे बाप रे, मेरे खाते में क्या प्रॉब्लम है?",
+                    "मुझे समझ नहीं आ रहा, क्या दिक्कत है?"
+                ]
+                return random.choice(responses), True
+            elif "link" in message_lower or "click" in message_lower:
+                responses = [
+                    "लिंक पे क्लिक करूं? ये सेफ है क्या?",
+                    "पहले बताइए ये लिंक किस चीज का है",
+                    "मुझे नहीं पता कैसे करना है, आप समझा सकते हैं?"
+                ]
+                return random.choice(responses), True
+            elif "otp" in message_lower or "pin" in message_lower:
+                responses = [
+                    "OTP क्यों चाहिए आपको? बैंक ने तो बोला था कभी मत देना",
+                    "PIN शेयर करना सेफ है क्या? मुझे डर लग रहा है",
+                    "पहले बताओ ये किस लिए चाहिए"
+                ]
+                return random.choice(responses), True
+        
+        # English fallback responses with more variety
         
         # Initial responses with variety
         if message_count == 0:
@@ -856,7 +906,19 @@ MAKE YOUR RESPONSE NATURAL, HUMAN-LIKE, AND STRATEGICALLY DESIGNED TO EXTRACT MA
                 "I'm worried about this. Can you explain more clearly what I need to do?",
                 "This is making me anxious. What exactly is the problem?",
                 "I don't understand what's happening. Can you help me?",
-                "Can you speak more slowly? I'm having trouble following.",
-                "What do I need to do to fix this? I don't want any problems."
+                "Wait, what are you saying? I'm confused.",
+                "Can you repeat that? I didn't quite catch it.",
+                "Hold on, let me understand this properly first.",
+                "What do I need to do to fix this? I don't want any problems.",
+                "Sorry, I'm not good with these things. Explain it simply?",
+                f"You're saying something about {message[:30]}...? What does that mean?"
             ]
+            # Add persona-specific response if available
+            if persona:
+                persona_vocab = persona.get("vocabulary", [])
+                if persona_vocab:
+                    vocab_phrase = random.choice(persona_vocab)
+                    base_response = random.choice(responses)
+                    return f"{vocab_phrase}, {base_response.lower()}", True
+            
             return random.choice(responses), True
