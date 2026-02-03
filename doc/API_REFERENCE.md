@@ -5,7 +5,13 @@ Complete API reference for the Honeypot Scam Detection API.
 ## Base URL
 
 - **Local**: `http://localhost:8000`
-- **Production**: `https://your-service-url.run.app`
+- **Production**: `https://honeypotscammer-136046240844.asia-south1.run.app`
+
+## Test Frontend
+
+- **Local UI**: http://localhost:8000
+- **Production UI**: https://honeypotscammer-136046240844.asia-south1.run.app
+- **API Documentation**: https://honeypotscammer-136046240844.asia-south1.run.app/docs
 
 ## Authentication
 
@@ -23,23 +29,24 @@ curl -H "x-api-key: your-secret-key" https://api.example.com/api/v1/honeypot
 
 ## Endpoints
 
-### 1. Root Endpoint
+### 1. Root Endpoint / Test Frontend
 
-Get basic API information.
+Serves the interactive test frontend UI for testing the AI agent.
 
 **Endpoint**: `GET /`
 
 **Authentication**: Not required
 
-**Response**:
-```json
-{
-  "status": "online",
-  "service": "Honeypot Scam Detection API",
-  "version": "1.0.0",
-  "environment": "production"
-}
-```
+**Response**: HTML page with chat interface for testing scam detection
+
+**Features**:
+- Interactive chat interface
+- Real-time AI agent responses
+- Multiple scam type selection
+- Quick test messages
+- Session management
+
+**Note**: If accessed via browser, returns the test UI. If you need API info as JSON, use `/health` endpoint.
 
 ---
 
