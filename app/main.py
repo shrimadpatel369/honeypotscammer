@@ -336,7 +336,10 @@ async def honeypot_endpoint(request: Request, honeypot_request: HoneypotRequest)
         agent_reply = ""
         should_continue = True
         
-        if scam_detected:
+        # Always engage to extract intelligence (honeypot behavior)
+        # Even if initial scam detection is uncertain, the AI will probe for more info
+        if scam_detected or len(honeypot_request.conversationHistory) > 0:
+            # Engage if scam detected OR if conversation already started
             agent_reply, should_continue = await ai_agent.generate_response(
                 current_message=honeypot_request.message.text,
                 conversation_history=[msg.model_dump() for msg in all_messages],
@@ -344,6 +347,15 @@ async def honeypot_endpoint(request: Request, honeypot_request: HoneypotRequest)
                 metadata=honeypot_request.metadata.model_dump() if honeypot_request.metadata else {}
             )
             logger.info(f"AI agent generated response for session {honeypot_request.sessionId}")
+        elif len(all_messages) == 1:
+            # First message and no clear scam detected - still engage cautiously
+            agent_reply, should_continue = await ai_agent.generate_response(
+                current_message=honeypot_request.message.text,
+                conversation_history=[msg.model_dump() for msg in all_messages],
+                session_context=session,
+                metadata=honeypot_request.metadata.model_dump() if honeypot_request.metadata else {}
+            )
+            logger.info(f"AI agent engaging with first message in session {honeypot_request.sessionId}")
         
         # Extract intelligence from conversation
         extracted_intelligence = await intelligence_extractor.extract_intelligence(
