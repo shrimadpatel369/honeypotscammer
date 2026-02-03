@@ -1,0 +1,583 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Honeypot AI Agent Tester</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 20px;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            overflow: hidden;
+        }
+        .header {
+            background: #667eea;
+            color: white;
+            padding: 25px;
+            text-align: center;
+        }
+        .header h1 {
+            font-size: 28px;
+            margin-bottom: 10px;
+        }
+        .header p {
+            font-size: 14px;
+            opacity: 0.9;
+        }
+        .controls {
+            padding: 20px;
+            background: #f7f7f7;
+            border-bottom: 2px solid #e0e0e0;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+        }
+        .control-group {
+            display: flex;
+            flex-direction: column;
+        }
+        .control-group label {
+            margin-bottom: 5px;
+            font-weight: 600;
+            color: #333;
+            font-size: 13px;
+        }
+        .control-group select, .control-group input {
+            padding: 10px;
+            border: 2px solid #ddd;
+            border-radius: 5px;
+            font-size: 14px;
+            background: white;
+        }
+        .control-group select:focus, .control-group input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        .session-info {
+            padding: 15px 20px;
+            background: #fff3cd;
+            border-bottom: 1px solid #ffc107;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .session-info-text {
+            font-size: 13px;
+            color: #856404;
+        }
+        .session-id {
+            font-weight: 600;
+            font-family: monospace;
+        }
+        .btn-reset {
+            background: #dc3545;
+            color: white;
+            padding: 8px 16px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 600;
+            transition: background 0.3s;
+        }
+        .btn-reset:hover {
+            background: #c82333;
+        }
+        .chat-container {
+            height: 450px;
+            overflow-y: auto;
+            padding: 20px;
+            background: #fafafa;
+        }
+        .chat-container::-webkit-scrollbar {
+            width: 8px;
+        }
+        .chat-container::-webkit-scrollbar-track {
+            background: #f1f1f1;
+        }
+        .chat-container::-webkit-scrollbar-thumb {
+            background: #888;
+            border-radius: 4px;
+        }
+        .chat-container::-webkit-scrollbar-thumb:hover {
+            background: #555;
+        }
+        .message {
+            margin-bottom: 20px;
+            display: flex;
+            animation: fadeIn 0.3s ease-in;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .message.scammer {
+            justify-content: flex-start;
+        }
+        .message.agent {
+            justify-content: flex-end;
+        }
+        .message-content {
+            max-width: 70%;
+            display: flex;
+            flex-direction: column;
+        }
+        .message-label {
+            font-size: 11px;
+            color: #666;
+            margin-bottom: 5px;
+            font-weight: 600;
+        }
+        .message.scammer .message-label {
+            text-align: left;
+        }
+        .message.agent .message-label {
+            text-align: right;
+        }
+        .message-bubble {
+            padding: 12px 16px;
+            border-radius: 18px;
+            word-wrap: break-word;
+            line-height: 1.5;
+        }
+        .message.scammer .message-bubble {
+            background: #fff;
+            color: #333;
+            border: 2px solid #e3f2fd;
+            border-bottom-left-radius: 4px;
+        }
+        .message.agent .message-bubble {
+            background: #667eea;
+            color: white;
+            border-bottom-right-radius: 4px;
+            box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+        }
+        .system-message {
+            text-align: center;
+            padding: 10px;
+            color: #999;
+            font-style: italic;
+            font-size: 13px;
+        }
+        .loading {
+            text-align: center;
+            padding: 15px;
+            color: #667eea;
+            font-style: italic;
+            animation: pulse 1.5s ease-in-out infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        .input-area {
+            padding: 20px;
+            background: #f7f7f7;
+            border-top: 2px solid #e0e0e0;
+            display: flex;
+            gap: 10px;
+        }
+        .input-area input {
+            flex: 1;
+            padding: 12px 18px;
+            border: 2px solid #ddd;
+            border-radius: 25px;
+            font-size: 14px;
+            transition: border-color 0.3s;
+        }
+        .input-area input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        .input-area button {
+            padding: 12px 30px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 25px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 14px;
+            transition: all 0.3s;
+        }
+        .input-area button:hover {
+            background: #5568d3;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+        .input-area button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+        .stats {
+            padding: 15px 20px;
+            background: white;
+            border-top: 1px solid #e0e0e0;
+            display: flex;
+            justify-content: space-around;
+            font-size: 12px;
+        }
+        .stat-item {
+            text-align: center;
+        }
+        .stat-label {
+            color: #666;
+            margin-bottom: 3px;
+        }
+        .stat-value {
+            font-size: 18px;
+            font-weight: 700;
+            color: #667eea;
+        }
+        .quick-messages {
+            padding: 15px 20px;
+            background: #f0f0f0;
+            border-bottom: 1px solid #e0e0e0;
+        }
+        .quick-messages-label {
+            font-size: 12px;
+            font-weight: 600;
+            color: #666;
+            margin-bottom: 8px;
+        }
+        .quick-message-buttons {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        .quick-msg-btn {
+            padding: 6px 12px;
+            background: white;
+            border: 1px solid #ddd;
+            border-radius: 15px;
+            cursor: pointer;
+            font-size: 12px;
+            transition: all 0.2s;
+        }
+        .quick-msg-btn:hover {
+            background: #667eea;
+            color: white;
+            border-color: #667eea;
+        }
+        .error-message {
+            background: #f8d7da;
+            color: #721c24;
+            padding: 12px;
+            border-radius: 8px;
+            margin: 10px;
+            border: 1px solid #f5c6cb;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🍯 Honeypot AI Agent Tester</h1>
+            <p>Test the AI agent's responses to scammer messages in real-time</p>
+        </div>
+        
+        <div class="session-info">
+            <div class="session-info-text">
+                Session ID: <span class="session-id" id="sessionId">-</span>
+            </div>
+            <button class="btn-reset" onclick="resetSession()">🔄 New Session</button>
+        </div>
+        
+        <div class="controls">
+            <div class="control-group">
+                <label>🎭 Scam Type:</label>
+                <select id="scamType">
+                    <option value="bank_fraud">Bank Fraud</option>
+                    <option value="upi_scam">UPI Scam</option>
+                    <option value="technical_support">Technical Support</option>
+                    <option value="prize_lottery">Prize/Lottery</option>
+                    <option value="phishing">Phishing</option>
+                    <option value="job_scam">Job Scam</option>
+                    <option value="romance_scam">Romance Scam</option>
+                </select>
+            </div>
+            <div class="control-group">
+                <label>📱 Channel:</label>
+                <select id="channel">
+                    <option value="SMS">SMS</option>
+                    <option value="WhatsApp">WhatsApp</option>
+                    <option value="Telegram">Telegram</option>
+                    <option value="Email">Email</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="quick-messages">
+            <div class="quick-messages-label">⚡ Quick Test Messages:</div>
+            <div class="quick-message-buttons">
+                <button class="quick-msg-btn" onclick="useQuickMessage('Your bank account has been blocked. Click here to verify immediately.')">Bank Alert</button>
+                <button class="quick-msg-btn" onclick="useQuickMessage('You have won Rs 5,00,000! Send your details to claim prize.')">Lottery Win</button>
+                <button class="quick-msg-btn" onclick="useQuickMessage('Your KYC is not updated. Complete now or account will be suspended.')">KYC Alert</button>
+                <button class="quick-msg-btn" onclick="useQuickMessage('Dear customer, verify your UPI PIN for security update.')">UPI Scam</button>
+                <button class="quick-msg-btn" onclick="useQuickMessage('Microsoft support here. Your computer has virus. Call now.')">Tech Support</button>
+            </div>
+        </div>
+        
+        <div class="chat-container" id="chatContainer">
+            <div class="system-message">💬 Start a conversation by sending a scammer message below...</div>
+        </div>
+        
+        <div class="input-area">
+            <input 
+                type="text" 
+                id="messageInput" 
+                placeholder="Type scammer message here... (or use quick messages above)"
+                onkeypress="if(event.key==='Enter') sendMessage()"
+                autocomplete="off"
+            >
+            <button onclick="sendMessage()" id="sendBtn">Send 📤</button>
+        </div>
+
+        <div class="stats">
+            <div class="stat-item">
+                <div class="stat-label">Messages Sent</div>
+                <div class="stat-value" id="messageCount">0</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-label">AI Responses</div>
+                <div class="stat-value" id="responseCount">0</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-label">Session Duration</div>
+                <div class="stat-value" id="duration">0:00</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let sessionId = null;
+        let conversationHistory = [];
+        let messageCount = 0;
+        let responseCount = 0;
+        let sessionStartTime = null;
+        let durationInterval = null;
+        // Auto-detect API base URL (works for both local and production)
+        const API_BASE = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+            ? 'http://localhost:8000/api/v1'
+            : `${window.location.protocol}//${window.location.host}/api/v1`;
+
+        // Initialize new session
+        async function resetSession() {
+            conversationHistory = [];
+            messageCount = 0;
+            responseCount = 0;
+            sessionId = 'test_' + Date.now();
+            sessionStartTime = Date.now();
+            
+            document.getElementById('sessionId').textContent = sessionId;
+            document.getElementById('messageCount').textContent = '0';
+            document.getElementById('responseCount').textContent = '0';
+            document.getElementById('duration').textContent = '0:00';
+            document.getElementById('chatContainer').innerHTML = 
+                '<div class="system-message">💬 New session started. Send a scammer message to begin...</div>';
+            
+            // Start duration timer
+            if (durationInterval) clearInterval(durationInterval);
+            durationInterval = setInterval(updateDuration, 1000);
+        }
+
+        // Update session duration
+        function updateDuration() {
+            if (!sessionStartTime) return;
+            const elapsed = Math.floor((Date.now() - sessionStartTime) / 1000);
+            const minutes = Math.floor(elapsed / 60);
+            const seconds = elapsed % 60;
+            document.getElementById('duration').textContent = 
+                `${minutes}:${seconds.toString().padStart(2, '0')}`;
+        }
+
+        // Use quick message
+        function useQuickMessage(message) {
+            document.getElementById('messageInput').value = message;
+            document.getElementById('messageInput').focus();
+        }
+
+        // Send message and get AI response
+        async function sendMessage() {
+            const input = document.getElementById('messageInput');
+            const message = input.value.trim();
+            
+            if (!message) {
+                input.focus();
+                return;
+            }
+            
+            if (!sessionId) {
+                await resetSession();
+            }
+            
+            // Disable input
+            input.disabled = true;
+            document.getElementById('sendBtn').disabled = true;
+            
+            // Add scammer message to UI
+            addMessage(message, 'scammer');
+            messageCount++;
+            document.getElementById('messageCount').textContent = messageCount;
+            input.value = '';
+            
+            // Show loading
+            const chatContainer = document.getElementById('chatContainer');
+            const loadingDiv = document.createElement('div');
+            loadingDiv.className = 'loading';
+            loadingDiv.id = 'loading';
+            loadingDiv.innerHTML = '🤖 AI is analyzing and generating response...';
+            chatContainer.appendChild(loadingDiv);
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+            
+            try {
+                // Call API
+                const scamType = document.getElementById('scamType').value;
+                const channel = document.getElementById('channel').value;
+                
+                const response = await fetch(`${API_BASE}/messages/incoming`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        sessionId: sessionId,
+                        text: message,
+                        sender: 'scammer',
+                        metadata: {
+                            channel: channel,
+                            scamType: scamType,
+                            language: 'English',
+                            locale: 'IN'
+                        }
+                    })
+                });
+                
+                // Remove loading
+                document.getElementById('loading')?.remove();
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                const data = await response.json();
+                
+                if (data.success && data.data.aiResponse) {
+                    // Add AI response to UI
+                    addMessage(data.data.aiResponse, 'agent');
+                    responseCount++;
+                    document.getElementById('responseCount').textContent = responseCount;
+                    
+                    // Update conversation history
+                    conversationHistory.push(
+                        { sender: 'scammer', text: message },
+                        { sender: 'agent', text: data.data.aiResponse }
+                    );
+                    
+                    // Check if conversation should end
+                    if (!data.data.shouldContinue) {
+                        addSystemMessage('⚠️ AI decided to end the conversation (detected end scenario)');
+                    }
+                } else {
+                    addErrorMessage('API Error: ' + (data.message || 'Unknown error occurred'));
+                }
+                
+            } catch (error) {
+                document.getElementById('loading')?.remove();
+                addErrorMessage('Connection Error: ' + error.message + 
+                    '<br><small>Make sure the API server is running on http://localhost:8000</small>');
+                console.error('Error:', error);
+            } finally {
+                // Re-enable input
+                input.disabled = false;
+                document.getElementById('sendBtn').disabled = false;
+                input.focus();
+            }
+        }
+
+        // Add message to chat UI
+        function addMessage(text, type) {
+            const chatContainer = document.getElementById('chatContainer');
+            
+            // Remove initial system message
+            const initialMsg = chatContainer.querySelector('.system-message');
+            if (initialMsg) {
+                initialMsg.remove();
+            }
+            
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${type}`;
+            
+            const label = type === 'scammer' ? '🎣 Scammer' : '🤖 AI Agent';
+            const timestamp = new Date().toLocaleTimeString('en-US', { 
+                hour: '2-digit', 
+                minute: '2-digit' 
+            });
+            
+            messageDiv.innerHTML = `
+                <div class="message-content">
+                    <div class="message-label">${label} • ${timestamp}</div>
+                    <div class="message-bubble">${escapeHtml(text)}</div>
+                </div>
+            `;
+            
+            chatContainer.appendChild(messageDiv);
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
+
+        // Add system message
+        function addSystemMessage(text) {
+            const chatContainer = document.getElementById('chatContainer');
+            const systemDiv = document.createElement('div');
+            systemDiv.className = 'system-message';
+            systemDiv.textContent = text;
+            chatContainer.appendChild(systemDiv);
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
+
+        // Add error message
+        function addErrorMessage(html) {
+            const chatContainer = document.getElementById('chatContainer');
+            const errorDiv = document.createElement('div');
+            errorDiv.className = 'error-message';
+            errorDiv.innerHTML = '❌ ' + html;
+            chatContainer.appendChild(errorDiv);
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
+
+        // Escape HTML
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // Initialize on load
+        window.onload = () => {
+            resetSession();
+            document.getElementById('messageInput').focus();
+        };
+
+        // Cleanup on unload
+        window.onbeforeunload = () => {
+            if (durationInterval) clearInterval(durationInterval);
+        };
+    </script>
+</body>
+</html>
