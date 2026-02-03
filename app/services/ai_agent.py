@@ -19,9 +19,32 @@ class AIAgentService:
     """Advanced AI Agent for engaging with scammers - Human-like behavior with dynamic responses"""
     
     def __init__(self):
+        # Only use currently supported Gemini models (as of Feb 2026)
+        # Avoid deprecated models like gemini-pro (deprecated Dec 2024)
+        self.supported_models = [
+            "gemini-2.0-flash-exp",      # Latest experimental (Feb 2026)
+            "gemini-1.5-pro-002",        # Stable production model
+            "gemini-1.5-flash-002",      # Fast and efficient
+            "gemini-1.5-pro",            # Fallback stable
+            "gemini-1.5-flash",          # Fallback fast
+        ]
+        
+        # Try to use the best available model
+        selected_model = settings.gemini_model
+        for model_name in self.supported_models:
+            try:
+                # Test if model is available and not deprecated
+                test_model = genai.GenerativeModel(model_name)
+                selected_model = model_name
+                logger.info(f"✅ Using supported model: {model_name}")
+                break
+            except Exception as e:
+                logger.debug(f"Model {model_name} not available: {e}")
+                continue
+        
         # Use premium model with high creativity settings for natural conversation
         self.model = genai.GenerativeModel(
-            settings.gemini_model,
+            selected_model,
             generation_config={
                 "temperature": 0.85,  # High temperature for very creative, human-like responses
                 "top_p": 0.95,
@@ -30,24 +53,128 @@ class AIAgentService:
             }
         )
         
-        # Try to use the most advanced model available
-        self.preferred_models = [
-            "gemini-1.5-pro-latest",  # Most advanced if available
-            "gemini-1.5-pro",
-            "gemini-1.0-pro",
-            settings.gemini_model  # Fallback to config
-        ]
+        self.current_model = selected_model
         
-        # Use the best available model
-        for model_name in self.preferred_models:
-            try:
-                test_model = genai.GenerativeModel(model_name)
-                # Test if model works
-                settings.gemini_model = model_name
-                logger.info(f"Using advanced model: {model_name}")
-                break
-            except Exception:
-                continue
+        # Multi-lingual support - language detection and natural responses
+        self.supported_languages = {
+            "english": {
+                "code": "en",
+                "detect_keywords": ["the", "is", "are", "you", "your", "account", "bank"],
+                "name": "English"
+            },
+            "hindi": {
+                "code": "hi",
+                "detect_keywords": ["आप", "है", "हैं", "का", "की", "में", "से", "कर", "खाता", "बैंक"],
+                "name": "हिन्दी"
+            },
+            "gujarati": {
+                "code": "gu",
+                "detect_keywords": ["તમે", "છે", "છો", "ના", "ની", "માં", "થી", "કરો", "ખાતું", "બેંક"],
+                "name": "ગુજરાતી"
+            },
+            "marathi": {
+                "code": "mr",
+                "detect_keywords": ["तुम्ही", "आहे", "आहेत", "च्या", "ची", "मध्ये", "पासून", "करा", "खाते", "बँक"],
+                "name": "मराठी"
+            },
+            "tamil": {
+                "code": "ta",
+                "detect_keywords": ["நீங்கள்", "உள்ளது", "உள்ளன", "இன்", "ஆக", "இல்", "இருந்து", "செய்", "கணக்கு", "வங்கி"],
+                "name": "தமிழ்"
+            },
+            "telugu": {
+                "code": "te",
+                "detect_keywords": ["మీరు", "ఉంది", "ఉన్నారు", "యొక్క", "లో", "నుండి", "చేయండి", "ఖాతా", "బ్యాంకు"],
+                "name": "తెలుగు"
+            },
+            "bengali": {
+                "code": "bn",
+                "detect_keywords": ["আপনি", "আছে", "আছেন", "এর", "তে", "থেকে", "করুন", "অ্যাকাউন্ট", "ব্যাংক"],
+                "name": "বাংলা"
+            },
+            "punjabi": {
+                "code": "pa",
+                "detect_keywords": ["ਤੁਸੀਂ", "ਹੈ", "ਹੋ", "ਦਾ", "ਦੀ", "ਵਿੱਚ", "ਤੋਂ", "ਕਰੋ", "ਖਾਤਾ", "ਬੈਂਕ"],
+                "name": "ਪੰਜਾਬੀ"
+            },
+            "kannada": {
+                "code": "kn",
+                "detect_keywords": ["ನೀವು", "ಇದೆ", "ಇದ್ದಾರೆ", "ಯ", "ರ", "ನಲ್ಲಿ", "ಇಂದ", "ಮಾಡಿ", "ಖಾತೆ", "ಬ್ಯಾಂಕ್"],
+                "name": "ಕನ್ನಡ"
+            },
+            "urdu": {
+                "code": "ur",
+                "detect_keywords": ["آپ", "ہے", "ہیں", "کا", "کی", "میں", "سے", "کریں", "اکاؤنٹ", "بینک"],
+                "name": "اردو"
+            }
+        }
+        
+        # Language-specific speech patterns and expressions
+        self.language_patterns = {
+            "hindi": {
+                "fillers": ["अरे", "हाँ", "अच्छा", "ठीक है", "देखो"],
+                "worry": ["अरे बाप रे", "हे भगवान", "क्या करूं", "बहुत चिंता हो रही है"],
+                "confusion": ["समझ नहीं आया", "क्या मतलब", "कैसे", "फिर से बताइए"],
+                "agreement": ["हाँ ठीक है", "अच्छा", "जी हाँ", "बिलकुल"],
+                "typo_patterns": {"है": "हे", "में": "मे", "हैं": "है", "करूं": "करु"}
+            },
+            "gujarati": {
+                "fillers": ["અરે", "હા", "સારું", "ઠીક છે", "જુઓ"],
+                "worry": ["અરે બાપ રે", "હે ભગવાન", "શું કરું", "ઘણી ચિંતા છે"],
+                "confusion": ["સમજાયું નહીં", "શું મતલબ", "કેવી રીતે", "ફરી કહો"],
+                "agreement": ["હા બરાબર", "સારું", "હા જી", "ચોક્કસ"],
+                "typo_patterns": {"છે": "છ", "માં": "મા", "છો": "છ", "કરું": "કરુ"}
+            },
+            "marathi": {
+                "fillers": ["अरे", "हो", "बरं", "ठीक आहे", "बघा"],
+                "worry": ["अरे देवा", "काय करू", "खूप चिंता होतेय"],
+                "confusion": ["समजलं नाही", "काय म्हणता", "कसं", "पुन्हा सांगा"],
+                "agreement": ["हो बरोबर", "ठीक आहे", "होय", "नक्की"],
+                "typo_patterns": {"आहे": "आह", "मध्ये": "मधे", "करू": "करु"}
+            },
+            "tamil": {
+                "fillers": ["சரி", "ஆமா", "பார்", "ஓகே"],
+                "worry": ["அய்யோ", "கடவுளே", "என்ன செய்வேன்", "ரொம்ப கவலையா இருக்கு"],
+                "confusion": ["புரியலை", "என்ன அர்த்தம்", "எப்படி", "மறுபடி சொல்லுங்க"],
+                "agreement": ["சரி", "ஆமா", "ஓகே", "நிச்சயமா"],
+                "typo_patterns": {}
+            },
+            "telugu": {
+                "fillers": ["అరే", "అవును", "సరే", "చూడు"],
+                "worry": ["అయ్యో", "దేవుడా", "ఏం చేస్తాను", "చాలా ఆందోళనగా ఉంది"],
+                "confusion": ["అర్థం కాలేదు", "ఏమిటి అర్థం", "ఎలా", "మళ్ళీ చెప్పండి"],
+                "agreement": ["అవును సరే", "ఓకే", "తప్పకుండా"],
+                "typo_patterns": {}
+            },
+            "bengali": {
+                "fillers": ["আরে", "হ্যাঁ", "ঠিক আছে", "দেখো"],
+                "worry": ["আরে বাবা", "ভগবান", "কি করব", "অনেক চিন্তা হচ্ছে"],
+                "confusion": ["বুঝলাম না", "কি মানে", "কিভাবে", "আবার বলুন"],
+                "agreement": ["হ্যাঁ ঠিক", "আচ্ছা", "অবশ্যই"],
+                "typo_patterns": {"আছে": "আছ", "করুন": "করু"}
+            },
+            "punjabi": {
+                "fillers": ["ਓਏ", "ਹਾਂ", "ਠੀਕ ਆ", "ਵੇਖੋ"],
+                "worry": ["ਓਏ ਰੱਬਾ", "ਕੀ ਕਰਾਂ", "ਬਹੁਤ ਚਿੰਤਾ ਆ"],
+                "confusion": ["ਸਮਝ ਨਹੀਂ ਆਈ", "ਕੀ ਮਤਲਬ", "ਕਿਵੇਂ", "ਫੇਰ ਦੱਸੋ"],
+                "agreement": ["ਹਾਂ ਠੀਕ", "ਬਿਲਕੁਲ", "ਪੱਕਾ"],
+                "typo_patterns": {}
+            },
+            "kannada": {
+                "fillers": ["ಹೌದು", "ಸರಿ", "ನೋಡು", "ಓಕೆ"],
+                "worry": ["ಅಯ್ಯೋ", "ದೇವರೇ", "ಏನು ಮಾಡಲಿ", "ತುಂಬಾ ಚಿಂತೆ ಆಗ್ತಿದೆ"],
+                "confusion": ["ಅರ್ಥವಾಗಲಿಲ್ಲ", "ಏನು ಅರ್ಥ", "ಹೇಗೆ", "ಮತ್ತೆ ಹೇಳಿ"],
+                "agreement": ["ಹೌದು ಸರಿ", "ಖಂಡಿತ"],
+                "typo_patterns": {}
+            },
+            "urdu": {
+                "fillers": ["اچھا", "ہاں", "ٹھیک ہے", "دیکھو"],
+                "worry": ["یا اللہ", "کیا کروں", "بہت فکر ہو رہی ہے"],
+                "confusion": ["سمجھ نہیں آیا", "کیا مطلب", "کیسے", "پھر بتائیں"],
+                "agreement": ["ہاں ٹھیک", "بالکل", "یقیناً"],
+                "typo_patterns": {"ہے": "ھے", "میں": "مے", "کریں": "کرے"}
+            }
+        }
         
         # Advanced persona profiles with psychological traits and high creativity
         self.personas = {
@@ -139,6 +266,27 @@ class AIAgentService:
         # Response variation patterns
         self.last_responses = defaultdict(list)
     
+    def _detect_language(self, text: str) -> str:
+        """Detect the language of the input text"""
+        text_lower = text.lower()
+        
+        # Count matches for each language
+        language_scores = {}
+        for lang_name, lang_info in self.supported_languages.items():
+            score = 0
+            for keyword in lang_info["detect_keywords"]:
+                if keyword in text or keyword.lower() in text_lower:
+                    score += 1
+            language_scores[lang_name] = score
+        
+        # Return language with highest score, default to english
+        detected = max(language_scores.items(), key=lambda x: x[1])
+        if detected[1] > 0:
+            logger.info(f"🌐 Detected language: {detected[0]} (score: {detected[1]})")
+            return detected[0]
+        
+        return "english"
+    
     def _analyze_conversation_context(self, conversation_history: List[Dict[str, Any]], current_message: str) -> Dict[str, Any]:
         """Analyze conversation to determine optimal response strategy"""
         message_count = len(conversation_history)
@@ -196,12 +344,28 @@ class AIAgentService:
         self.conversation_memory[session_id]["persona"] = persona_key
         return persona_key, self.personas[persona_key]
     
-    def _generate_human_like_variations(self, base_response: str, persona: Dict[str, Any]) -> str:
-        """Add extensive human-like variations to responses"""
+    def _generate_human_like_variations(self, base_response: str, persona: Dict[str, Any], language: str = "english") -> str:
+        """Add extensive human-like variations to responses with multi-lingual support"""
         response = base_response
         
-        # Add speech fillers randomly (more human-like)
-        if random.random() < 0.3:
+        # Get language-specific patterns
+        lang_patterns = self.language_patterns.get(language, {})
+        
+        # Add language-specific fillers
+        if lang_patterns and "fillers" in lang_patterns and random.random() < 0.3:
+            filler = random.choice(lang_patterns["fillers"])
+            if random.random() < 0.5:
+                response = f"{filler} {response}"
+            else:
+                # Insert filler in the middle for natural flow
+                words = response.split()
+                if len(words) > 3:
+                    insert_pos = random.randint(1, min(3, len(words)-1))
+                    words.insert(insert_pos, filler)
+                    response = " ".join(words)
+        
+        # For English, add speech fillers
+        if language == "english" and random.random() < 0.3:
             filler = random.choice(self.speech_patterns["fillers"])
             if random.random() < 0.5:
                 response = f"{filler}, {response.lower()}"
@@ -218,30 +382,45 @@ class AIAgentService:
         if vocab and random.random() < 0.4:  # 40% chance for persona words
             response = f"{random.choice(vocab)}, {response.lower()}"
         
-        # Add emphasis words
-        if random.random() < 0.25:
+        # Add emphasis words for English
+        if language == "english" and random.random() < 0.25:
             emphasis = random.choice(self.speech_patterns["emphasis"])
             response = response.replace(" is ", f" is {emphasis} ")
             response = response.replace(" was ", f" was {emphasis} ")
         
         # Add hesitation for cautious personas
         if "cautious" in persona.get("traits", []) and random.random() < 0.3:
-            hesitation = random.choice(self.speech_patterns["hesitation"])
-            response = f"{hesitation} {response.lower()}"
+            if language == "english":
+                hesitation = random.choice(self.speech_patterns["hesitation"])
+                response = f"{hesitation} {response.lower()}"
         
-        # Add typos based on persona (more realistic patterns)
+        # Add language-specific typos
         typo_rate = persona.get("typo_rate", 0.05)
         if random.random() < typo_rate:
-            response = self._add_realistic_typo(response)
+            if lang_patterns and "typo_patterns" in lang_patterns:
+                response = self._add_language_specific_typo(response, lang_patterns["typo_patterns"])
+            else:
+                response = self._add_realistic_typo(response)
         
         # Add emotional elements based on context
         if random.random() < 0.25:  # 25% chance for emotional expression
-            emotion = random.choice(list(self.emotional_states.keys()))
-            emotional_phrase = random.choice(self.emotional_states[emotion])
-            if random.random() < 0.5:
-                response = f"{emotional_phrase}. {response}"
+            if lang_patterns and random.random() < 0.6:
+                # Use language-specific emotions
+                emotion_type = random.choice(["worry", "confusion", "agreement"])
+                if emotion_type in lang_patterns:
+                    emotional_phrase = random.choice(lang_patterns[emotion_type])
+                    if random.random() < 0.5:
+                        response = f"{emotional_phrase} {response}"
+                    else:
+                        response = f"{response} {emotional_phrase}"
             else:
-                response = f"{response} {emotional_phrase}."
+                # Use English emotions
+                emotion = random.choice(list(self.emotional_states.keys()))
+                emotional_phrase = random.choice(self.emotional_states[emotion])
+                if random.random() < 0.5:
+                    response = f"{emotional_phrase}. {response}"
+                else:
+                    response = f"{response} {emotional_phrase}."
         
         # Add quirks specific to persona
         quirks = persona.get("quirks", [])
@@ -256,7 +435,7 @@ class AIAgentService:
                         words[idx] = words[idx].upper()
                     response = " ".join(words)
             
-            elif "uses abbreviations" in quirks and random.random() < 0.4:
+            elif "uses abbreviations" in quirks and language == "english" and random.random() < 0.4:
                 # Replace some words with abbreviations
                 response = response.replace(" you ", " u ")
                 response = response.replace(" are ", " r ")
@@ -264,7 +443,7 @@ class AIAgentService:
                 response = response.replace(" for ", " 4 ")
         
         # Add natural conversation flow elements
-        if random.random() < 0.2:
+        if language == "english" and random.random() < 0.2:
             if "eager" in persona.get("traits", []):
                 flow_starter = random.choice(self.conversation_flows["compliance"])
                 response = f"{flow_starter}. {response}"
@@ -273,6 +452,19 @@ class AIAgentService:
                 response = f"{response} {flow_starter}"
         
         return response
+    
+    def _add_language_specific_typo(self, text: str, typo_patterns: Dict[str, str]) -> str:
+        """Add language-specific typos based on common mistakes"""
+        if not typo_patterns:
+            return text
+        
+        words = text.split()
+        for i, word in enumerate(words):
+            if word in typo_patterns and random.random() < 0.7:
+                words[i] = typo_patterns[word]
+                break
+        
+        return " ".join(words)
     
     def _add_realistic_typo(self, text: str) -> str:
         """Add realistic typos that humans commonly make"""
@@ -371,6 +563,22 @@ class AIAgentService:
         try:
             session_id = session_context.get("sessionId", "unknown")
             
+            # Detect language from current message and conversation history
+            all_text = current_message + " "
+            for msg in conversation_history[-5:]:
+                all_text += msg.get("text", "") + " "
+            
+            detected_language = self._detect_language(all_text)
+            language_info = self.supported_languages.get(detected_language, self.supported_languages["english"])
+            
+            # Store detected language for consistency
+            if "language" not in self.conversation_memory[session_id]:
+                self.conversation_memory[session_id]["language"] = detected_language
+            else:
+                # Use previously detected language for consistency
+                detected_language = self.conversation_memory[session_id]["language"]
+                language_info = self.supported_languages.get(detected_language, self.supported_languages["english"])
+            
             # Analyze conversation context for smart persona selection
             context_analysis = self._analyze_conversation_context(conversation_history, current_message)
             
@@ -406,10 +614,24 @@ class AIAgentService:
             # Select targeted extraction questions
             extraction_questions = self._select_extraction_strategy(current_message, context_analysis)
             
-            # Build advanced engagement prompt
+            # Build advanced engagement prompt with multi-lingual support
+            language_instruction = ""
+            if detected_language != "english":
+                language_instruction = f"""
+
+CRITICAL LANGUAGE REQUIREMENT:
+- The scammer is communicating in {language_info['name']} ({detected_language})
+- You MUST respond ONLY in {language_info['name']}
+- Use natural {detected_language} language patterns and expressions
+- Your response should be completely in {language_info['name']}, NO English mixing
+- Use appropriate cultural context for {detected_language} speakers
+- Show emotions and reactions natural to {detected_language} culture
+"""
+            
             prompt = f"""ADVANCED HONEYPOT AGENT - HUMAN BEHAVIORAL SIMULATION
 
 MISSION: Extract maximum intelligence while maintaining perfect human cover.
+{language_instruction}
 
 CURRENT PERSONA: {persona_key}
 {persona_profile['description']}
@@ -417,6 +639,7 @@ CURRENT PERSONA: {persona_key}
 PERSONA TRAITS: {', '.join(persona_profile['traits'])}
 TYPICAL VOCABULARY: {', '.join(persona_profile.get('vocabulary', []))}
 RESPONSE SPEED: {persona_profile.get('response_time', 'medium')}
+LANGUAGE: {language_info['name']} ({language_info['code']})
 
 CONVERSATION ANALYSIS:
 - Messages exchanged: {context_analysis['message_count']}
@@ -426,7 +649,7 @@ CONVERSATION ANALYSIS:
 - Technical elements involved: {context_analysis['tech_involved']}
 - Conversation stage: {context_analysis['conversation_length']}
 
-CHANNEL: {metadata.get('channel', 'SMS')} | LANGUAGE: {metadata.get('language', 'English')} | REGION: {metadata.get('locale', 'IN')}
+CHANNEL: {metadata.get('channel', 'SMS')} | DETECTED LANGUAGE: {detected_language} | REGION: {metadata.get('locale', 'IN')}
 
 {examples_text}
 
@@ -474,57 +697,13 @@ Respond with ONLY valid JSON in this exact format:
 }}
 
 MAKE YOUR RESPONSE NATURAL, HUMAN-LIKE, AND STRATEGICALLY DESIGNED TO EXTRACT MAXIMUM INTELLIGENCE."""
-4. BUILD TRUST: Show concern, vulnerability, and willingness to comply
-5. DELAY AND PROBE: Don't give information immediately, ask clarifying questions
-6. STAY IN CHARACTER: Use the persona consistently
-
-YOUR PERSONA: {persona}
-
-Channel: {metadata.get('channel', 'SMS')}
-Language: {metadata.get('language', 'English')}
-Locale: {metadata.get('locale', 'IN')}
-Scam Type: {scam_type or 'unknown'}
-
-{examples_text}
-
-{context}
-
-Latest message from scammer: "{current_message}"
-
-Engagement Strategy:
-- If they ask for personal info: Show concern but ask why/how first
-- If they share a link: Ask what it's for, seem hesitant
-- If they mention payment: Ask for more details about the process
-- If they give account/UPI: Repeat it back to "confirm" (helps extraction)
-- If they pressure you: Show worry but ask questions
-- Gradually reveal "information" to keep them engaged (use fake data)
-
-Message Count: {message_count}
-Strategy Phase: {"Initial Trust Building" if message_count < 5 else "Information Extraction" if message_count < 15 else "Deep Extraction"}
-
-Respond with ONLY valid JSON in this exact format:
-{{
-    "response": "Your human-like reply here (1-3 sentences, natural language, show emotion)",
-    "should_continue": true/false,
-    "internal_notes": "Strategy note about what you're trying to extract"
-}}
-
-Guidelines:
-- Keep responses short and natural (20-50 words typically)
-- Use conversational language appropriate for the channel
-- Show appropriate emotions (worry, confusion, relief)
-- Occasionally make minor typos or grammar mistakes (be subtle)
-- Ask follow-up questions to extract more information
-- Set should_continue to false only if scammer stops responding meaningfully or conversation has gone 20+ messages
-
-RESPOND ONLY WITH THE JSON. NO OTHER TEXT."""
 
             # Generate response with very high temperature for maximum creativity
             persona_temp = persona_profile.get("temperature", 0.8)
             
             # Adjust model settings for this specific response - high creativity
             dynamic_model = genai.GenerativeModel(
-                settings.gemini_model,
+                self.current_model,
                 generation_config={
                     "temperature": min(0.95, persona_temp + 0.1),  # Very high but not max
                     "top_p": 0.98,  # Allow more diverse responses
@@ -559,8 +738,8 @@ RESPOND ONLY WITH THE JSON. NO OTHER TEXT."""
             emotional_state = result.get("emotional_state", "neutral")
             extraction_focus = result.get("extraction_focus", "general")
             
-            # Apply human-like variations to the response
-            agent_response = self._generate_human_like_variations(agent_response, persona_profile)
+            # Apply human-like variations to the response with language support
+            agent_response = self._generate_human_like_variations(agent_response, persona_profile, detected_language)
             
             # Avoid repetitive responses
             if session_id in self.last_responses:
@@ -586,10 +765,11 @@ RESPOND ONLY WITH THE JSON. NO OTHER TEXT."""
             self.conversation_memory[session_id].update({
                 "last_emotional_state": emotional_state,
                 "extraction_focus": extraction_focus,
-                "message_count": context_analysis["message_count"] + 1
+                "message_count": context_analysis["message_count"] + 1,
+                "language": detected_language
             })
             
-            logger.info(f"AI Agent ({persona_key}) response: {internal_notes} | Emotion: {emotional_state} | Focus: {extraction_focus}")
+            logger.info(f"🤖 AI Agent ({persona_key}) | Lang: {detected_language} | {internal_notes} | Emotion: {emotional_state} | Focus: {extraction_focus}")
             logger.debug(f"Response: {agent_response}")
             
             return agent_response, should_continue
