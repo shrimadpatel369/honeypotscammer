@@ -670,6 +670,14 @@ BEHAVIORAL REQUIREMENTS:
 - Express concerns in a way that extracts more details
 - Build trust while gathering intelligence
 
+CRITICAL - AVOID REPETITIVE PHRASES:
+- NEVER use phrases like "you're saying something about..." or "can you repeat that?" more than once
+- NEVER start consecutive responses with the same words or structure
+- Vary your response format: questions, statements, emotional reactions, requests for help
+- Each response should feel unique and naturally flow from the previous message
+- Reference specific details from the scammer's message, not generic templates
+- Use different conversation starters: surprise, confusion, agreement, worry, curiosity
+
 RESPONSE STRATEGY BASED ON STAGE:
 - Short conversations (1-5 messages): Build initial trust, show concern
 - Medium conversations (6-15 messages): Ask detailed questions, show slight suspicion but be convincible
@@ -743,32 +751,50 @@ MAKE YOUR RESPONSE NATURAL, HUMAN-LIKE, AND STRATEGICALLY DESIGNED TO EXTRACT MA
             # Apply human-like variations to the response with language support
             agent_response = self._generate_human_like_variations(agent_response, persona_profile, detected_language)
             
-            # Avoid repetitive responses
+            # Avoid repetitive responses - enhanced detection
             if session_id in self.last_responses:
                 recent_responses = self.last_responses[session_id]
-                # Check for exact or very similar responses
+                # Check for exact or very similar responses (check similarity, not just exact match)
                 response_lower = agent_response.lower()
-                is_repetitive = any(response_lower == prev.lower() for prev in recent_responses[-3:])
                 
-                if is_repetitive:
-                    # Generate a much more varied response based on message context
+                # Check exact matches
+                is_exact_repetitive = any(response_lower == prev.lower() for prev in recent_responses[-5:])
+                
+                # Check for similar patterns (same starting words)
+                first_words = ' '.join(response_lower.split()[:4])
+                is_pattern_repetitive = any(first_words in prev.lower() for prev in recent_responses[-3:])
+                
+                # Check for overused phrases
+                overused_phrases = [
+                    "you're saying", "can you repeat", "didn't catch", "what do you mean",
+                    "i don't understand what's happening", "can you help me"
+                ]
+                has_overused = any(phrase in response_lower for phrase in overused_phrases)
+                
+                if is_exact_repetitive or is_pattern_repetitive or (has_overused and len(recent_responses) > 2):
+                    # Generate highly varied contextual responses
+                    scammer_msg_snippet = current_message[:40].strip()
+                    
                     if detected_language == "hindi":
                         variations = [
-                            "समझ नहीं आया, कुछ और बताइए?",
-                            "ये क्या बात हुई? मुझे पूरी तरह समझाइए",
-                            "अरे रुको, ये फिर से समझाओ",
-                            "थोड़ा आसान भाषा में बताओ ना"
+                            f"रुको, {scammer_msg_snippet}...? इसका क्या मतलब है?",
+                            "थोड़ा और डिटेल में बताओ, मुझे ठीक से समझ नहीं आया",
+                            "अच्छा, तो मुझे क्या करना होगा? स्टेप बाय स्टेप बताओ",
+                            "ये सब कुछ कन्फ्यूजिंग है यार, सीधे सीधे बताओ",
+                            "पहले मुझे ये समझाओ कि ये किसके बारे में है?"
                         ]
                     else:
                         variations = [
-                            "Sorry, what do you mean exactly?",
-                            "I'm not following. Can you be more specific?",
-                            "Hold on, explain that again?",
-                            "That's confusing me. Tell me in simpler terms?",
-                            f"Wait what? Are you saying {current_message[:30]}...? I don't get it"
+                            f"Okay so you want me to {scammer_msg_snippet}? Why exactly?",
+                            "I'm trying to follow but this is confusing. Break it down for me step by step?",
+                            "Look, I need to understand this better. What's the actual issue here?",
+                            "Alright, one second. So what exactly do you need from me?",
+                            f"You mentioned {scammer_msg_snippet}... can you give me more details about that?",
+                            "Hmm, this doesn't quite make sense to me. Can you clarify?",
+                            "I'm getting lost here. Start from the beginning?"
                         ]
                     agent_response = random.choice(variations)
-                    logger.info(f"🔄 Detected repetition, using variation: {agent_response}")
+                    logger.info(f"🔄 Detected repetition (exact:{is_exact_repetitive}, pattern:{is_pattern_repetitive}, overused:{has_overused}), using variation: {agent_response}")
             
             # Store response for future variation checking
             if session_id not in self.last_responses:
@@ -900,25 +926,61 @@ MAKE YOUR RESPONSE NATURAL, HUMAN-LIKE, AND STRATEGICALLY DESIGNED TO EXTRACT MA
             ]
             return random.choice(responses), False
         
-        # General worried responses
+        # General responses with much more variety - avoid repetition
         else:
-            responses = [
-                "I'm worried about this. Can you explain more clearly what I need to do?",
-                "This is making me anxious. What exactly is the problem?",
-                "I don't understand what's happening. Can you help me?",
-                "Wait, what are you saying? I'm confused.",
-                "Can you repeat that? I didn't quite catch it.",
-                "Hold on, let me understand this properly first.",
-                "What do I need to do to fix this? I don't want any problems.",
-                "Sorry, I'm not good with these things. Explain it simply?",
-                f"You're saying something about {message[:30]}...? What does that mean?"
+            # Categorize responses by type for better variety
+            confused_responses = [
+                "Wait, I don't follow what you're saying. Can you be clearer?",
+                "This doesn't make much sense to me. What are you talking about?",
+                "I'm lost here. What exactly do you mean?",
+                "Huh? I don't get what you want me to do.",
+                "Hold up, slow down. I'm confused about this.",
             ]
-            # Add persona-specific response if available
+            
+            worried_responses = [
+                "Oh god, this sounds serious. What's the problem?",
+                "I'm really concerned now. Is something wrong?",
+                "This is worrying me. Tell me what's going on?",
+                "That doesn't sound good. Should I be worried?",
+            ]
+            
+            direct_questions = [
+                "Okay so what exactly do you need from me?",
+                "Alright, just tell me straight - what's this about?",
+                "Look, I'm trying to understand. What do I need to do?",
+                "Can you just explain it simply? I'm not tech-savvy.",
+                "So basically, what are you asking me for?",
+            ]
+            
+            contextual_responses = [
+                f"You mentioned something about '{message[:35]}'... elaborate on that?",
+                f"Okay, regarding {message[:30]}... can you give me more info?",
+                "Right, but what does that have to do with me?",
+                "I see, but why are you telling me this?",
+            ]
+            
+            impatient_responses = [
+                "This is taking forever. Just get to the point?",
+                "Can we speed this up? What's the actual issue?",
+                "I'm busy right now. Quickly, what do you need?",
+            ]
+            
+            # Randomly choose from different categories for maximum variety
+            all_response_groups = [
+                confused_responses, worried_responses, direct_questions,
+                contextual_responses, impatient_responses
+            ]
+            
+            # Choose from a random category
+            chosen_group = random.choice(all_response_groups)
+            base_response = random.choice(chosen_group)
+            
+            # Add persona-specific flair if available
             if persona:
                 persona_vocab = persona.get("vocabulary", [])
-                if persona_vocab:
+                if persona_vocab and random.random() < 0.4:
                     vocab_phrase = random.choice(persona_vocab)
-                    base_response = random.choice(responses)
                     return f"{vocab_phrase}, {base_response.lower()}", True
             
-            return random.choice(responses), True
+            return base_response, True
+
