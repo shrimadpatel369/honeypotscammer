@@ -107,7 +107,21 @@ class TrainingManager:
         try:
             import pandas as pd
             
-            df = pd.read_csv(file_path)
+            # Try different encodings
+            encodings = ['utf-8', 'latin-1', 'iso-8859-1', 'cp1252', 'utf-16']
+            df = None
+            
+            for encoding in encodings:
+                try:
+                    df = pd.read_csv(file_path, encoding=encoding)
+                    logger.info(f"Successfully read CSV with {encoding} encoding")
+                    break
+                except (UnicodeDecodeError, UnicodeError):
+                    continue
+            
+            if df is None:
+                return {'success': False, 'error': 'Could not decode CSV with common encodings'}
+            
             examples = []
             
             for _, row in df.iterrows():
@@ -139,6 +153,45 @@ class TrainingManager:
             return {'success': success, 'count': len(examples)}
         except Exception as e:
             logger.error(f"JSON import error: {e}")
+            return {'success': False, 'error': str(e)}
+    
+    async def import_text_file(self, file_path: str, scam_type: str = "unknown") -> Dict[str, Any]:
+        """
+        Import plain text file (one message per line)
+        Common for simple scam message datasets
+        """
+        try:
+            # Try different encodings
+            encodings = ['utf-8', 'latin-1', 'iso-8859-1', 'cp1252', 'utf-16']
+            lines = None
+            
+            for encoding in encodings:
+                try:
+                    with open(file_path, 'r', encoding=encoding) as f:
+                        lines = f.readlines()
+                    logger.info(f"Successfully read text file with {encoding} encoding")
+                    break
+                except (UnicodeDecodeError, UnicodeError):
+                    continue
+            
+            if lines is None:
+                return {'success': False, 'error': 'Could not decode text file with common encodings'}
+            
+            examples = []
+            for line in lines:
+                line = line.strip()
+                if line:  # Skip empty lines
+                    example = {
+                        'scammer_message': line,
+                        'scam_type': scam_type,
+                        'label': 'scam'
+                    }
+                    examples.append(example)
+            
+            success = await self.store_examples(examples, source='kaggle')
+            return {'success': success, 'count': len(examples)}
+        except Exception as e:
+            logger.error(f"Text import error: {e}")
             return {'success': False, 'error': str(e)}
     
     async def get_statistics(self) -> Dict[str, Any]:

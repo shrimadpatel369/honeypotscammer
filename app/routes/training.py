@@ -139,6 +139,47 @@ async def import_json(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post("/import-text")
+async def import_text(
+    file: UploadFile = File(...),
+    scam_type: str = "unknown",
+    api_key: str = Depends(verify_api_key)
+):
+    """
+    Import plain text file (one scam message per line)
+    
+    Perfect for simple text datasets where each line is a scam message.
+    Common formats: .txt, .text
+    """
+    try:
+        if not file.filename.endswith(('.txt', '.text')):
+            raise HTTPException(status_code=400, detail="Only .txt or .text files allowed")
+        
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.txt') as tmp:
+            content = await file.read()
+            tmp.write(content)
+            tmp_path = tmp.name
+        
+        result = await training_manager.import_text_file(tmp_path, scam_type)
+        os.unlink(tmp_path)
+        
+        if result['success']:
+            return {
+                "success": True,
+                "count": result['count'],
+                "file": file.filename,
+                "scam_type": scam_type,
+                "message": f"Imported {result['count']} messages as '{scam_type}' type"
+            }
+        else:
+            raise HTTPException(status_code=400, detail=result.get('error'))
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/stats")
 async def get_stats(api_key: str = Depends(verify_api_key)):
     """
