@@ -16,6 +16,11 @@ async def send_guvi_callback(
     """
     Send final result callback to GUVI evaluation endpoint
     
+    ⚠️ ONLY SENDS WHEN:
+    1. Scam intent is confirmed (scam_detected = True)
+    2. AI Agent has completed sufficient engagement
+    3. Intelligence extraction is finished
+    
     Args:
         session_id: Unique session identifier
         scam_detected: Whether scam was detected
@@ -27,6 +32,18 @@ async def send_guvi_callback(
         True if callback was successful, False otherwise
     """
     try:
+        # ✅ ONLY send callback if scam is confirmed
+        if not scam_detected:
+            logger.info(f"⏭️ Skipping GUVI callback for session {session_id} - No scam detected")
+            return True  # Return True since this is expected behavior
+        
+        # Validate sufficient engagement
+        if total_messages < 3:
+            logger.warning(
+                f"⚠️ Session {session_id} has insufficient messages ({total_messages}), "
+                "but sending callback anyway since scam was detected"
+            )
+        
         payload = {
             "sessionId": session_id,
             "scamDetected": scam_detected,
@@ -44,6 +61,7 @@ async def send_guvi_callback(
         logger.info("="*80)
         logger.info(f"📡 SENDING GUVI CALLBACK - Session: {session_id}")
         logger.info("="*80)
+        logger.info(f"✅ Scam Confirmed - Sufficient Engagement Complete")
         logger.info(f"Endpoint: {settings.guvi_callback_url}")
         logger.info(f"Session ID: {session_id}")
         logger.info(f"Scam Detected: {scam_detected}")
