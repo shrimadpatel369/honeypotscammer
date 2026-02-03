@@ -474,36 +474,46 @@
                 
                 const data = await response.json();
                 
-                if (data.success && data.data.aiResponse) {
+                // Log response for debugging
+                console.log('API Response:', data);
+                
+                if (data.reply) {
                     // Add AI response to UI
-                    addMessage(data.data.aiResponse, 'agent');
+                    addMessage(data.reply, 'agent');
                     responseCount++;
                     document.getElementById('responseCount').textContent = responseCount;
                     
                     // Update conversation history
                     conversationHistory.push(
                         { sender: 'sender', text: message },
-                        { sender: 'agent', text: data.data.aiResponse }
+                        { sender: 'agent', text: data.reply }
                     );
                     
                     // Check if conversation should end
-                    if (!data.data.shouldContinue) {
+                    if (!data.shouldContinue) {
                         addSystemMessage('🎯 CONVERSATION TERMINATED: AI detected sufficient intelligence extracted');
-                        addSystemMessage('📊 Intelligence gathered: ' + 
-                            JSON.stringify(data.data.extractedIntelligence || {}, null, 2));
+                        const intel = data.extractedIntelligence || {};
+                        const intelText = JSON.stringify({
+                            bankAccounts: intel.bankAccounts || [],
+                            phoneNumbers: intel.phoneNumbers || [],
+                            upiIds: intel.upiIds || [],
+                            phishingLinks: intel.phishingLinks || [],
+                            suspiciousKeywords: intel.suspiciousKeywords || []
+                        }, null, 2);
+                        addSystemMessage('📊 Intelligence gathered: ' + intelText);
                         document.getElementById('aiStatus').textContent = '✅ Session Complete';
                     } else {
                         document.getElementById('aiStatus').textContent = '🤖 AI Ready';
                     }
                     
                     // Show detection results
-                    if (data.data.scamDetected) {
-                        addSystemMessage('⚠️ SCAM DETECTED: ' + data.data.scamType + ' (Confidence: ' + 
-                            Math.round(data.data.scamConfidence * 100) + '%)');
+                    if (data.scamDetected) {
+                        const keywords = data.extractedIntelligence?.suspiciousKeywords?.join(', ') || 'Unknown';
+                        addSystemMessage('⚠️ SCAM DETECTED - Keywords: ' + keywords);
                     }
                     
                 } else {
-                    addErrorMessage('API Error: ' + (data.message || 'Unknown error occurred'));
+                    addErrorMessage('API Error: No reply generated. Response: ' + JSON.stringify(data));
                     document.getElementById('aiStatus').textContent = '❌ Error';
                 }
                 
