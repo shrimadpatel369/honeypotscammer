@@ -300,16 +300,22 @@ class AIAgentService:
     
     def _sanitize_response(self, response: str) -> str:
         """
-        Sanitize AI response to remove any JSON structure artifacts.
+        Sanitize AI response to remove any JSON structure artifacts and XML reasoning tags.
         Ensures only natural language text is returned to scammers.
         Enhanced to catch JSON ANYWHERE in the response, not just at the start.
+        Also removes <reasoning> XML tags that leak internal AI thought process.
         """
         if not response:
             return response
         
         original_response = response
         
-        # CRITICAL FIX: Remove JSON fragments that appear ANYWHERE in the text
+        # CRITICAL FIX 1: Remove <reasoning> XML tags and their content
+        # Matches: <reasoning>...</reasoning> or incomplete <reasoning>...
+        response = re.sub(r'<reasoning>.*?</reasoning>', '', response, flags=re.DOTALL | re.IGNORECASE)
+        response = re.sub(r'<reasoning>.*', '', response, flags=re.DOTALL | re.IGNORECASE)
+        
+        # CRITICAL FIX 2: Remove JSON fragments that appear ANYWHERE in the text
         # Pattern 1: Remove complete JSON objects anywhere in text
         # Matches: text { "response": "content" } more text
         response = re.sub(r'\{[^}]*["\']?response["\']?\s*:\s*["\'][^"\']*["\'][^}]*\}', '', response, flags=re.IGNORECASE)
@@ -339,7 +345,7 @@ class AIAgentService:
         response = response.replace('\\n', ' ')
         
         # Pattern 7: Remove empty quotes and extra punctuation
-        response = re.sub(r'["\'][\s]*["\']', '', response)
+        response = re.sub(r'["\']\s*["\']', '', response)
         
         # Clean up whitespace
         response = ' '.join(response.split())
@@ -354,7 +360,7 @@ class AIAgentService:
         
         # Log if we made changes
         if response != original_response:
-            logger.warning(f"🧹 JSON SANITIZATION APPLIED:")
+            logger.warning(f"🧹 RESPONSE SANITIZATION APPLIED:")
             logger.warning(f"   BEFORE: '{original_response}'")
             logger.warning(f"   AFTER:  '{response}'")
         
