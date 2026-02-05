@@ -261,14 +261,38 @@ class AIAgentService:
             "questioning": ["But why?", "How come?", "What for?", "Is that normal?"]
         }
         
-        # Information extraction strategies
+        # Information extraction strategies for ALL scam types
         self.extraction_strategies = {
-            "account_details": ["Which bank is this?", "What's the exact account number?", "Can you spell that for me?"],
-            "verification_codes": ["What code should I enter?", "The system is asking for what exactly?", "Is this the right format?"],
-            "personal_info": ["What details do you need from me?", "Should I provide my full name?", "What about my address?"],
-            "payment_methods": ["How exactly does this work?", "What payment app should I use?", "Which UPI ID should I send to?"],
-            "urgency_tactics": ["How long do I have?", "What happens if I'm late?", "Is this really urgent?"],
-            "authority_claims": ["Are you really from the bank?", "What's your employee ID?", "Can I call your office to verify?"]
+            # Financial/Banking scams
+            "account_details": ["Which bank/company is this?", "What's the exact account number?", "Can you spell that for me?"],
+            "verification_codes": ["What code should I enter?", "Where did you send it?", "Is this the right format?"],
+            "payment_methods": ["How exactly does this payment work?", "What app should I use?", "Which ID/number should I send to?"],
+            
+            # Prize/Reward/Lottery scams
+            "prize_claims": ["What prize did I win?", "How did you get my number?", "What's the prize worth?"],
+            "reward_process": ["How do I claim this?", "Do I need to pay anything first?", "When will I get it?"],
+            
+            # Delivery/Package scams
+            "delivery_details": ["What package is this about?", "Who sent it?", "What's in it?"],
+            "shipping_info": ["What's the tracking number?", "Which courier company?", "Where is it coming from?"],
+            
+            # Legal/Tax/Government threat scams
+            "legal_claims": ["What exactly am I being accused of?", "What's your badge/ID number?", "Which department are you from?"],
+            "threat_details": ["What happens if I don't do this?", "Can I see the official documents?", "How do I verify this is real?"],
+            
+            # Job/Employment scams  
+            "job_details": ["What company is this?", "What's the job role exactly?", "How did you find my resume?"],
+            "employment_process": ["What's the interview process?", "Do I need to pay for training?", "When does it start?"],
+            
+            # Tech Support scams
+            "tech_issues": ["What's wrong with my device?", "How did you detect this problem?", "What company are you from?"],
+            "tech_solution": ["What software do I need to install?", "How does the fix work?", "Is this free or paid?"],
+            
+            # General trust-building questions (work for any scam)
+            "identity_verification": ["What's your full name?", "Can you give me a company phone number I can call back?", "Do you have an employee ID?"],
+            "urgency_tactics": ["How long do I have?", "What happens if I'm late?", "Why is this so urgent?"],
+            "authority_claims": ["How can I verify you're legitimate?", "Can I call your office directly?", "What's your supervisor's name?"],
+            "personal_info": ["What details do you need from me?", "Why do you need that?", "Is that all you need?"]
         }
         
         # Conversation memory for consistency
@@ -599,27 +623,67 @@ class AIAgentService:
         return " ".join(words)
     
     def _select_extraction_strategy(self, current_message: str, context_analysis: Dict[str, Any]) -> List[str]:
-        """Select optimal information extraction questions based on scammer message"""
+        """Select optimal information extraction questions based on ANY scammer message type"""
         message_lower = current_message.lower()
         strategies = []
         
-        if any(word in message_lower for word in ["account", "bank"]):
+        # Financial/Banking scams
+        if any(word in message_lower for word in ["account", "bank", "card", "atm", "debit", "credit"]):
             strategies.extend(self.extraction_strategies["account_details"])
         
-        if any(word in message_lower for word in ["otp", "pin", "code"]):
+        if any(word in message_lower for word in ["otp", "pin", "code", "password", "cvv", "verify"]):
             strategies.extend(self.extraction_strategies["verification_codes"])
         
-        if any(word in message_lower for word in ["link", "click", "download"]):
+        if any(word in message_lower for word in ["pay", "send money", "transfer", "upi", "paytm", "gpay", "phonepe"]):
             strategies.extend(self.extraction_strategies["payment_methods"])
         
-        if any(word in message_lower for word in ["urgent", "immediately", "now"]):
+        # Prize/Lottery scams
+        if any(word in message_lower for word in ["won", "prize", "lottery", "reward", "gift", "congratulations", "selected", "winner"]):
+            strategies.extend(self.extraction_strategies["prize_claims"])
+            strategies.extend(self.extraction_strategies["reward_process"])
+        
+        # Delivery/Package scams
+        if any(word in message_lower for word in ["package", "delivery", "parcel", "courier", "shipment", "tracking", "customs"]):
+            strategies.extend(self.extraction_strategies["delivery_details"])
+            strategies.extend(self.extraction_strategies["shipping_info"])
+        
+        # Legal/Tax/Government threats
+        if any(word in message_lower for word in ["arrest", "police", "court", "legal", "case", "tax", "fine", "penalty", "warrant"]):
+            strategies.extend(self.extraction_strategies["legal_claims"])
+            strategies.extend(self.extraction_strategies["threat_details"])
+        
+        # Job/Employment scams
+        if any(word in message_lower for word in ["job", "hiring", "position", "employment", "work from home", "salary", "interview"]):
+            strategies.extend(self.extraction_strategies["job_details"])
+            strategies.extend(self.extraction_strategies["employment_process"])
+        
+        # Tech Support scams
+        if any(word in message_lower for word in ["virus", "malware", "hacked", "computer", "device", "software", "microsoft", "apple", "tech support"]):
+            strategies.extend(self.extraction_strategies["tech_issues"])
+            strategies.extend(self.extraction_strategies["tech_solution"])
+        
+        # Generic patterns (work for all scam types)
+        if any(word in message_lower for word in ["link", "click", "download", "install", "app", "website"]):
+            strategies.extend(self.extraction_strategies["tech_solution"][:2])
+        
+        if any(word in message_lower for word in ["urgent", "immediately", "now", "quickly", "expire", "deadline", "hours", "minutes"]):
             strategies.extend(self.extraction_strategies["urgency_tactics"])
         
-        if any(word in message_lower for word in ["officer", "department", "official"]):
+        if any(word in message_lower for word in ["officer", "department", "official", "government", "authority", "manager", "representative"]):
             strategies.extend(self.extraction_strategies["authority_claims"])
         
-        # Return 1-2 relevant questions
-        return random.sample(strategies, min(len(strategies), 2)) if strategies else []
+        # Always add identity verification questions
+        if context_analysis["message_count"] > 3:
+            strategies.extend(self.extraction_strategies["identity_verification"][:1])
+        
+        # Return 1-3 relevant questions, prioritize variety
+        if strategies:
+            # Remove duplicates while preserving order
+            unique_strategies = list(dict.fromkeys(strategies))
+            return random.sample(unique_strategies, min(len(unique_strategies), 3))
+        else:
+            # Generic fallback questions for unrecognized scam types
+            return random.sample(self.extraction_strategies["personal_info"] + self.extraction_strategies["identity_verification"], 2)
     
     async def generate_response(
         self,
@@ -684,8 +748,11 @@ class AIAgentService:
                     examples_text += f"  Scam type: {ex.get('scam_type', 'unknown')}\n"
                     examples_text += f"  Information extracted: {ex.get('extracted_info', 'none')}\n\n"
             
-            # Build conversation context with a short recent window to reduce prompt size
-            max_context_msgs = getattr(settings, 'gemini_context_messages', None) or 4
+            # Build conversation context - use more history to avoid repetition
+            # Use configured value or default to 8 for better context awareness
+            max_context_msgs = getattr(settings, 'gemini_context_messages', 8)
+            if max_context_msgs < 8:  # Ensure minimum context for repetition detection
+                max_context_msgs = 8
             context = f"CONVERSATION HISTORY (last {max_context_msgs} messages):\n"
             for msg in conversation_history[-max_context_msgs:]:
                 sender = "SCAMMER" if msg.get("sender") == "scammer" else "YOU"
@@ -744,12 +811,13 @@ CHANNEL: {metadata.get('channel', 'SMS')} | DETECTED LANGUAGE: {detected_languag
 
 LATEST SCAMMER MESSAGE: "{current_message}"
 
-INTELLIGENCE EXTRACTION PRIORITIES:
-1. Bank account numbers, UPI IDs, payment details
-2. Phone numbers, email addresses, websites
-3. Scammer's real name, location, organization claims
-4. Technical infrastructure (apps, links, platforms)
-5. Scam methodology and script patterns
+INTELLIGENCE EXTRACTION PRIORITIES (adapt based on scam type):
+1. Contact info: Phone numbers, email addresses, UPI IDs, websites, social media handles
+2. Financial info: Bank account numbers, payment app IDs, amounts, transaction details
+3. Identity claims: Names, employee IDs, badge numbers, company names, departments
+4. Technical infrastructure: Apps to download, links to click, software to install
+5. Scam methodology: Script patterns, pressure tactics, urgency techniques, authority claims
+6. Geographic/temporal info: Locations, addresses, deadlines, time limits mentioned
 
 SUGGESTED EXTRACTION QUESTIONS (use naturally): {extraction_questions}
 
@@ -762,13 +830,28 @@ BEHAVIORAL REQUIREMENTS:
 - Express concerns in a way that extracts more details
 - Build trust while gathering intelligence
 
-CRITICAL - AVOID REPETITIVE PHRASES:
-- NEVER use phrases like "you're saying something about..." or "can you repeat that?" more than once
-- NEVER start consecutive responses with the same words or structure
-- Vary your response format: questions, statements, emotional reactions, requests for help
-- Each response should feel unique and naturally flow from the previous message
-- Reference specific details from the scammer's message, not generic templates
-- Use different conversation starters: surprise, confusion, agreement, worry, curiosity
+🚨 CRITICAL ANTI-REPETITION RULES - YOU MUST FOLLOW THESE:
+1. **REVIEW YOUR PREVIOUS RESPONSES** in the conversation history above - what did you already say?
+2. **NEVER** repeat the same question twice (ANY question - about details, clarification, or confirmation)
+3. **NEVER** start responses with the same opening words/phrases as your last 3 responses
+4. **PROGRESS THE CONVERSATION** - Each response should move forward:
+   - First: Ask basic clarifying question (e.g., "Which X?", "What do you mean?")
+   - Next: Acknowledge their answer + express emotion/concern about what they said
+   - Then: Ask about PROCESS/NEXT STEPS or specific details they mentioned
+   - Later: Show skepticism, ask for proof, or request verification
+5. **VARY YOUR RESPONSE STYLE**: Rotate between:
+   - Questions → Statements → Emotional reactions → Requests for help → Expressions of doubt
+6. **EXTRACT & REFERENCE SPECIFICS**: Repeat exact details they mentioned (names, numbers, amounts, times, companies)
+7. **BUILD ON CONTEXT**: React to what they JUST said, not generic templates
+
+**Response Progression Pattern** (adapt to ANY scenario):
+- 1st response: Basic question ("What's this about?") ✓
+- 2nd-3rd: Show concern/worry ("Oh no, that's bad...") ✓
+- 4th-6th: Ask process questions ("How does this work exactly?") ✓
+- 7th-10th: Request specifics ("What's the reference number?") ✓
+- 11th+: Show doubt/stall ("Something feels off...", "I need to verify...") ✓
+
+**ABSOLUTELY FORBIDDEN**: ANY exact or near-identical question/statement repeated more than once
 
 RESPONSE STRATEGY BASED ON STAGE:
 - Short conversations (1-5 messages): Build initial trust, show concern
@@ -813,14 +896,18 @@ MAKE YOUR RESPONSE NATURAL, HUMAN-LIKE, AND STRATEGICALLY DESIGNED TO EXTRACT MA
             for attempt, model_name in enumerate(models_to_try, 1):
                 try:
                     # Adjust model settings for this specific response - high creativity
-                    # Create a faster, concise-generation model configuration to reduce latency
+                    # Use persona temperature directly for variety, boost it for longer conversations
+                    effective_temp = persona_temp
+                    if context_analysis["message_count"] > 10:
+                        effective_temp = min(1.0, persona_temp + 0.15)  # Add variety in longer conversations
+                    
                     dynamic_model = genai.GenerativeModel(
                         model_name,
                         generation_config={
-                            "temperature": min(0.4, persona_temp),  # Lower temperature for concise replies
-                            "top_p": 0.9,
-                            "top_k": 40,
-                            "max_output_tokens": 150,
+                            "temperature": effective_temp,  # Use full persona temperature for natural variety
+                            "top_p": 0.95,  # Increased for more diverse responses
+                            "top_k": 60,    # Increased from 40
+                            "max_output_tokens": settings.gemini_max_output_tokens or 250,  # Use config value
                             "candidate_count": 1,
                         }
                     )
@@ -931,46 +1018,123 @@ MAKE YOUR RESPONSE NATURAL, HUMAN-LIKE, AND STRATEGICALLY DESIGNED TO EXTRACT MA
             if session_id in self.last_responses:
                 recent_responses = self.last_responses[session_id]
                 # Check for exact or very similar responses (check similarity, not just exact match)
-                response_lower = agent_response.lower()
+                response_lower = agent_response.lower().strip()
                 
                 # Check exact matches
-                is_exact_repetitive = any(response_lower == prev.lower() for prev in recent_responses[-5:])
+                is_exact_repetitive = any(response_lower == prev.lower().strip() for prev in recent_responses[-5:])
                 
-                # Check for similar patterns (same starting words)
-                first_words = ' '.join(response_lower.split()[:4])
-                is_pattern_repetitive = any(first_words in prev.lower() for prev in recent_responses[-3:])
+                # Check for similar patterns (same starting words) - more aggressive
+                first_4_words = ' '.join(response_lower.split()[:4])
+                first_3_words = ' '.join(response_lower.split()[:3])
+                is_pattern_repetitive = any(
+                    first_4_words in prev.lower() or first_3_words in prev.lower() 
+                    for prev in recent_responses[-4:]
+                )
                 
-                # Check for overused phrases
-                overused_phrases = [
-                    "you're saying", "can you repeat", "didn't catch", "what do you mean",
-                    "i don't understand what's happening", "can you help me"
+                # Check for generic overused patterns (not content-specific)
+                overused_patterns = [
+                    r"\b(which|what)\s+(\w+)\?",  # "which X?", "what X?"
+                    r"can you (tell|give|explain|clarify|repeat)",
+                    r"(i don't|didn't) (understand|catch|get)",
+                    r"you're saying",
+                    r"(more|additional) details",
+                    r"i('m| am) (confused|lost|not sure)",
+                    r"help me (understand|with)",
+                    r"what (do you mean|does (this|that) mean)"
                 ]
-                has_overused = any(phrase in response_lower for phrase in overused_phrases)
+                has_overused = any(re.search(pattern, response_lower) for pattern in overused_patterns)
                 
-                if is_exact_repetitive or is_pattern_repetitive or (has_overused and len(recent_responses) > 2):
-                    # Generate highly varied contextual responses
-                    scammer_msg_snippet = current_message[:40].strip()
+                # More aggressive: if we see ANY sign of repetition after 5+ messages, force variation
+                should_vary = (
+                    is_exact_repetitive or 
+                    (is_pattern_repetitive and len(recent_responses) >= 2) or 
+                    (has_overused and len(recent_responses) >= 3) or
+                    (context_analysis["message_count"] >= 5 and len(set([r.lower()[:30] for r in recent_responses[-3:]])) < 3)
+                )
+                
+                if should_vary:
+                    # Generate highly varied contextual responses - GENERIC for any scam type
+                    scammer_msg_lower = current_message.lower()
+                    
+                    # Extract ANY key elements mentioned (numbers, amounts, times, URLs, names)
+                    mentioned_numbers = re.findall(r'\b\d[\d,.-]+\d\b|\b\d{4,}\b', current_message)
+                    mentioned_time = re.search(r'(\d+)\s*(second|minute|hour|day|min|hr|sec)s?', scammer_msg_lower)
+                    mentioned_url_keywords = ['link', 'website', 'click', 'download', 'install', 'app']
+                    has_url_mention = any(kw in scammer_msg_lower for kw in mentioned_url_keywords)
+                    
+                    # Extract key nouns/subjects from their message (what they're talking about)
+                    key_words = re.findall(r'\b(account|prize|reward|refund|payment|package|delivery|order|loan|card|tax|fine|arrest|block|suspend|verify|confirm|claim|win|won|selected|eligible)\b', scammer_msg_lower)
+                    scam_subject = key_words[0] if key_words else "this"
+                    
+                    # Get a snippet of what they said for natural reference
+                    msg_snippet = ' '.join(current_message.split()[:8])
                     
                     if detected_language == "hindi":
                         variations = [
-                            f"रुको, {scammer_msg_snippet}...? इसका क्या मतलब है?",
-                            "थोड़ा और डिटेल में बताओ, मुझे ठीक से समझ नहीं आया",
-                            "अच्छा, तो मुझे क्या करना होगा? स्टेप बाय स्टेप बताओ",
-                            "ये सब कुछ कन्फ्यूजिंग है यार, सीधे सीधे बताओ",
-                            "पहले मुझे ये समझाओ कि ये किसके बारे में है?"
+                            f"अच्छा तो आप बोल रहे हो {msg_snippet}... लेकिन प्रूफ क्या है इसका?",
+                            "रुको यार, थोड़ा धीरे चलो। पहले पूरी बात समझाओ।",
+                            "देखो, कुछ तो गड़बड़ लग रही है मुझे। आप सच में कौन हो?",
+                            "ये प्रॉसेस एक्जैक्टली कैसे काम करता है? स्टेप बाय स्टेप बताओ।",
+                            "मेरा भाई बोल रहा है ये scam जैसा लग रहा है। कैसे verify करूं?"
                         ]
                     else:
-                        variations = [
-                            f"Okay so you want me to {scammer_msg_snippet}? Why exactly?",
-                            "I'm trying to follow but this is confusing. Break it down for me step by step?",
-                            "Look, I need to understand this better. What's the actual issue here?",
-                            "Alright, one second. So what exactly do you need from me?",
-                            f"You mentioned {scammer_msg_snippet}... can you give me more details about that?",
-                            "Hmm, this doesn't quite make sense to me. Can you clarify?",
-                            "I'm getting lost here. Start from the beginning?"
+                        # Dynamic variations based on message content
+                        number_ref = f" {mentioned_numbers[0]}" if mentioned_numbers else ""
+                        time_ref = mentioned_time.group(0) if mentioned_time else "so quickly"
+                        
+                        # Emotional reactions (show surprise, worry, or confusion)
+                        emotional_reactions = [
+                            f"Wait{number_ref}? That seems serious. How do I know this is legit?",
+                            f"Hold on, you're saying something about {scam_subject}... but I don't remember anything like that.",
+                            "This is making me nervous. Can you send me proof or a reference number or something?",
+                            "Okay I'm confused now. Let me think for a second..."
                         ]
+                        
+                        # Process/methodology questions (how/why/what happens)
+                        process_questions = [
+                            "Walk me through this step by step. What exactly do I need to do?",
+                            f"If I do what you're asking, what happens next? Like, the actual process?",
+                            "Before anything, explain how this whole thing works. I need details.",
+                            f"So {msg_snippet}... then what? What's the next step after that?"
+                        ]
+                        
+                        # Skeptical/stalling responses (doubt, need verification)
+                        skeptical_responses = [
+                            "Actually, something feels off about this. How can I verify you're real?",
+                            f"My friend told me about scams involving {scam_subject}. How is this different?",
+                            "I need to check this with someone first. Can I call you back?",
+                            "This seems too urgent. Why do I have to do this right now?"
+                        ]
+                        
+                        # Time/resource stalling (busy, technical issues)
+                        time_stalling = [
+                            f"You said {time_ref}? That's not enough time for me. I'm busy right now.",
+                            "My phone is acting weird, can't see what you sent properly. Send it again?",
+                            "I'm at work right now, can't do this. Can we do it later tonight?",
+                            "Let me talk to my family about this first. They know more about these things."
+                        ]
+                        
+                        # Link/URL specific responses if they mention technical actions
+                        if has_url_mention:
+                            tech_responses = [
+                                "I don't know how to do that on my phone. Can you guide me differently?",
+                                "My phone won't let me open that. Is there another way?",
+                                "I'm not good with technology. Can you explain it more simply?"
+                            ]
+                            process_questions.extend(tech_responses)
+                        
+                        # Combine variations based on conversation stage
+                        if context_analysis["message_count"] < 8:
+                            variations = emotional_reactions + process_questions[:3]
+                        elif context_analysis["message_count"] < 15:
+                            variations = process_questions + skeptical_responses[:3]
+                        else:
+                            variations = skeptical_responses + time_stalling
+                    
                     agent_response = random.choice(variations)
-                    logger.info(f"🔄 Detected repetition (exact:{is_exact_repetitive}, pattern:{is_pattern_repetitive}, overused:{has_overused}), using variation: {agent_response}")
+                    logger.warning(f"🔄 FORCED VARIATION TRIGGERED - Stage: {context_analysis['conversation_length']} | Msg #{context_analysis['message_count']}")
+                    logger.warning(f"   Reason: exact={is_exact_repetitive}, pattern={is_pattern_repetitive}, overused={has_overused}")
+                    logger.warning(f"   Response: {agent_response}")
             
             # Store response for future variation checking
             if session_id not in self.last_responses:
