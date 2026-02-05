@@ -61,6 +61,12 @@ class Database:
         """Get intelligence collection"""
         db = cls.get_database()
         return db.intelligence
+    
+    @classmethod
+    def get_callbacks_collection(cls):
+        """Get callbacks collection"""
+        db = cls.get_database()
+        return db.callbacks
 
 
 # Convenience function
@@ -85,6 +91,13 @@ async def init_indexes():
         await training_collection.create_index("scam_type")
         await training_collection.create_index("source")
         await training_collection.create_index("created_at")
+        
+        # Callback response indexes
+        callbacks_collection = Database.get_callbacks_collection()
+        await callbacks_collection.create_index("sessionId")
+        await callbacks_collection.create_index("sentTime")
+        await callbacks_collection.create_index("success")
+        await callbacks_collection.create_index([("sessionId", 1), ("sentTime", -1)])
         
         logger.info("Database indexes created successfully")
     except Exception as e:

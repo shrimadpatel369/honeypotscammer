@@ -175,3 +175,62 @@ class SessionDocument(BaseModel):
                 "agentNotes": ""
             }
         }
+
+
+class CallbackResponse(BaseModel):
+    """MongoDB callback response document - Dynamic/Loose structure"""
+    sessionId: str
+    callbackUrl: str
+    sentPayload: Dict[str, Any]
+    responseStatus: int
+    responseBody: Union[str, Dict[str, Any], List[Any], Any] = Field(
+        default=None,
+        description="Flexible response body - can be string, JSON object, array, or any data type"
+    )
+    responseHeaders: Optional[Dict[str, Any]] = Field(
+        default_factory=dict,
+        description="HTTP response headers"
+    )
+    sentTime: datetime
+    success: bool
+    error: Optional[str] = None
+    rawResponse: Optional[str] = Field(
+        default=None,
+        description="Raw response string for reference"
+    )
+    metadata: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Additional metadata about the callback"
+    )
+
+    class Config:
+        extra = "allow"  # Allow extra fields for flexibility
+        json_schema_extra = {
+            "example": {
+                "sessionId": "abc123",
+                "callbackUrl": "https://guvi.example.com/callback",
+                "sentPayload": {
+                    "sessionId": "abc123",
+                    "scamDetected": True,
+                    "totalMessagesExchanged": 5
+                },
+                "responseStatus": 200,
+                "responseBody": {
+                    "status": "received",
+                    "id": "callback-123",
+                    "timestamp": "2026-01-21T10:15:30Z",
+                    "custom_field": "any_value"
+                },
+                "responseHeaders": {
+                    "content-type": "application/json",
+                    "x-custom-header": "value"
+                },
+                "sentTime": "2026-01-21T10:15:30Z",
+                "success": True,
+                "error": None,
+                "metadata": {
+                    "retryCount": 0,
+                    "processingTime": 1.23
+                }
+            }
+        }

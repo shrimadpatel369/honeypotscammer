@@ -20,7 +20,7 @@ from app.services.ai_agent import AIAgentService
 from app.services.intelligence_extractor import IntelligenceExtractorService
 from app.services.training_manager import training_manager
 from app.services.callback_monitor import callback_monitor
-from app.utils.callback import send_guvi_callback
+from app.utils.callback import send_guvi_callback, get_callback_response, get_all_callback_responses
 from app.cache import cache
 from app.routes import training
 from app.logger import (
@@ -525,6 +525,32 @@ async def honeypot_endpoint(request: Request, honeypot_request: HoneypotRequest)
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to process request: {str(e)}"
         )
+
+
+@app.get("/api/v1/sessions/{session_id}/callback")
+async def get_session_callback(session_id: str, api_key: str = Depends(verify_api_key)):
+    """Get the latest callback response for a session"""
+    callback_response = await get_callback_response(session_id)
+    
+    if not callback_response:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No callback response found for session {session_id}"
+        )
+    
+    return callback_response
+
+
+@app.get("/api/v1/sessions/{session_id}/callbacks")
+async def get_session_callbacks(session_id: str, api_key: str = Depends(verify_api_key)):
+    """Get all callback responses for a session"""
+    callback_responses = await get_all_callback_responses(session_id)
+    
+    return {
+        "sessionId": session_id,
+        "count": len(callback_responses),
+        "responses": callback_responses
+    }
 
 
 @app.get("/api/v1/sessions/{session_id}")
