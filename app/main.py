@@ -19,6 +19,7 @@ from app.services.scam_detector import ScamDetectorService
 from app.services.ai_agent import AIAgentService
 from app.services.intelligence_extractor import IntelligenceExtractorService
 from app.services.training_manager import training_manager
+from app.services.callback_monitor import callback_monitor
 from app.utils.callback import send_guvi_callback
 from app.cache import cache
 from app.routes import training
@@ -45,14 +46,20 @@ async def lifespan(app: FastAPI):
     logger.info("Starting application...")
     await Database.connect_db()
     await init_indexes()
+    
+    # Start callback monitor for auto-callbacks on inactive sessions
+    await callback_monitor.start()
+    
     logger.info(f"Application startup complete - Using {settings.gemini_model}")
     logger.info(f"MongoDB pool: {settings.mongodb_min_pool_size}-{settings.mongodb_max_pool_size} connections")
     logger.info(f"Caching: {'Enabled' if settings.enable_caching else 'Disabled'}")
+    logger.info(f"Callback monitor: Active (1.5min inactivity threshold)")
     
     yield
     
     # Shutdown
     logger.info("Shutting down application...")
+    await callback_monitor.stop()
     await Database.close_db()
     await cache.clear()
     logger.info("Application shutdown complete")
@@ -314,7 +321,8 @@ async def honeypot_endpoint(request: Request, honeypot_request: HoneypotRequest)
                 "lastUpdateTime": honeypot_request.message.timestamp,
                 "totalMessages": 0,
                 "status": "active",
-                "agentNotes": ""
+                "agentNotes": "",
+                "callbackSent": False  # Track callback status
             }
         
         # Add current message to history
@@ -416,7 +424,7 @@ async def honeypot_endpoint(request: Request, honeypot_request: HoneypotRequest)
                     logger.error(f"Learning error: {learn_error}")
             
             # Send final callback to GUVI
-            if session["scamDetected"]:
+            if session["scamDetected"] and not session.get("callbackSent", False):
                 callback_success = await send_guvi_callback(
                     session_id=honeypot_request.sessionId,
                     scam_detected=session["scamDetected"],
@@ -425,6 +433,8 @@ async def honeypot_endpoint(request: Request, honeypot_request: HoneypotRequest)
                     agent_notes=session["agentNotes"].strip(" |")
                 )
                 if callback_success:
+                    session["callbackSent"] = True
+                    session["callbackSentTime"] = honeypot_request.message.timestamp.isoformat()
                     logger.info(f"Successfully sent GUVI callback for session {honeypot_request.sessionId}")
                 else:
                     logger.error(f"Failed to send GUVI callback for session {honeypot_request.sessionId}")
