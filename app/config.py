@@ -31,9 +31,9 @@ class Settings(BaseSettings):
     gemini_model: str = "gemini-2.5-flash-lite"
     gemini_max_retries: int = 3
     gemini_timeout: int = 30
-    gemini_context_messages: int = 4  # Number of recent messages to include in prompt
-    gemini_max_output_tokens: int = 150  # Limit output length for faster generation
-    gemini_temperature: float = 0.6  # Lower temp for concise, deterministic responses
+    gemini_context_messages: int = 4  
+    gemini_max_output_tokens: int = 250  
+    gemini_temperature: float = 0.6
     
     # GUVI Callback
     guvi_callback_url: str = "https://hackathon.guvi.in/api/updateHoneyPotFinalResult"

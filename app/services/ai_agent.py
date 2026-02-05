@@ -58,10 +58,10 @@ class AIAgentService:
         self.model = genai.GenerativeModel(
             self.current_model,
             generation_config={
-                "temperature": 0.2,  # Lower temperature for concise, deterministic replies
-                "top_p": 0.9,
-                "top_k": 40,
-                "max_output_tokens": 150,  # Tight output limit for speed
+                "temperature": 0.6,
+                "top_p": 0.90,
+                "top_k": 100,
+                "max_output_tokens": 250,
                 "candidate_count": 1,
             }
         )
