@@ -424,7 +424,11 @@ async def honeypot_endpoint(request: Request, honeypot_request: HoneypotRequest)
                     logger.error(f"Learning error: {learn_error}")
             
             # Send final callback to GUVI
+            logger.info(f"Scam Detected: {session['scamDetected']} for session {honeypot_request.sessionId}")
+            logger.info(f"Session Callback Sent ? {session.get('callbackSent', False)}")
+            
             if session["scamDetected"] and not session.get("callbackSent", False):
+                logger.info(f"Preparing to send GUVI callback for session {honeypot_request.sessionId}")
                 callback_success = await send_guvi_callback(
                     session_id=honeypot_request.sessionId,
                     scam_detected=session["scamDetected"],

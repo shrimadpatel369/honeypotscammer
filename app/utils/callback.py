@@ -32,6 +32,10 @@ async def send_guvi_callback(
         True if callback was successful, False otherwise
     """
     try:
+        # Log function invocation
+        logger.info(f"🔔 GUVI callback function triggered for session: {session_id}")
+        logger.debug(f"Callback params - scam_detected: {scam_detected}, total_messages: {total_messages}")
+        
         # ✅ ONLY send callback if scam is confirmed
         if not scam_detected:
             logger.info(f"⏭️ Skipping GUVI callback for session {session_id} - No scam detected")
@@ -79,7 +83,11 @@ async def send_guvi_callback(
         logger.info(json.dumps(payload, indent=2, ensure_ascii=False))
         logger.debug(f"Callback payload: {payload}")
         
+        logger.info("🚀 Preparing to send HTTP POST request to GUVI callback endpoint")
+        logger.debug(f"GUVI Callback URL: {settings.guvi_callback_url}")
+        
         async with httpx.AsyncClient() as client:
+            logger.info(f"📤 Sending POST request with scam intelligence data for session {session_id}")
             response = await client.post(
                 settings.guvi_callback_url,
                 json=payload,
@@ -89,7 +97,7 @@ async def send_guvi_callback(
                 }
             )
             
-            logger.info(f"GUVI Callback Response - Status: {response.status_code}")
+            logger.info(f"📨 Received response from GUVI callback endpoint")
             logger.info(f"Response Body: {response.text}")
             logger.info("="*80)
             
