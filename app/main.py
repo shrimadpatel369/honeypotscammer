@@ -428,14 +428,25 @@ async def honeypot_endpoint(request: Request, honeypot_request: HoneypotRequest)
                 callback_success = await send_guvi_callback(
                     session_id=honeypot_request.sessionId,
                     scam_detected=session["scamDetected"],
+                    scam_type=session.get("scamType", "unknown"),
+                    confidence=session.get("scamConfidence", 0.0),
+                    intelligence=session.get("extractedIntelligence", {}),
+                    conversation_history=session["conversationHistory"],
                     total_messages=session["totalMessages"],
-                    extracted_intelligence=extracted_intelligence,
-                    agent_notes=session["agentNotes"].strip(" |")
+                    start_time=session["startTime"],
+                    end_time=datetime.utcnow().isoformat()
                 )
                 if callback_success:
                     session["callbackSent"] = True
                     session["callbackSentTime"] = honeypot_request.message.timestamp.isoformat()
                     logger.info(f"Successfully sent GUVI callback for session {honeypot_request.sessionId}")
+                    
+                    # Learn from successful session for future improvements
+                    try:
+                        await training_manager.learn_from_session(session)
+                        logger.info(f"🎓 Session data queued for live learning: {honeypot_request.sessionId}")
+                    except Exception as e:
+                        logger.error(f"Failed to learn from session: {e}")
                 else:
                     logger.error(f"Failed to send GUVI callback for session {honeypot_request.sessionId}")
         

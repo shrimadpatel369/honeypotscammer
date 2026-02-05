@@ -19,25 +19,39 @@ class AIAgentService:
     """Advanced AI Agent for engaging with scammers - Human-like behavior with dynamic responses"""
     
     def __init__(self):
-        # Only use currently supported Gemini models (as of Feb 2026)
-        # Avoid deprecated models like gemini-pro (deprecated Dec 2024)
+        # Comprehensive list of v1beta API compatible models (as of Feb 2026)
+        # Ordered by preference: Latest Gemini 3 > Gemini 2.5 > Gemini 2.0 > Gemini 1.5
         self.supported_models = [
-            "gemini-2.0-flash-exp",      # Latest experimental (Feb 2026)
-            "gemini-1.5-pro-002",        # Stable production model
-            "gemini-1.5-flash-002",      # Fast and efficient
-            "gemini-1.5-pro",            # Fallback stable
-            "gemini-1.5-flash",          # Fallback fast
+            # Gemini 3 (Latest - Preview models)
+            "gemini-3-pro-preview",          # Most intelligent multimodal model, 1M token context
+            "gemini-3-flash-preview",        # Fast Gemini 3, balanced performance
+            
+            # Gemini 2.5 (Production - Best for complex reasoning)
+            "gemini-2.5-pro",                # Complex reasoning and coding, 1M token context
+            "gemini-2.5-flash",              # Balance of intelligence and latency
+            "gemini-2.5-flash-lite",         # Efficient high-frequency tasks
+            
+            # Gemini 2.0 (Experimental - Will retire March 31, 2026)
+            "gemini-2.0-flash-exp",          # Latest experimental flash model
+            
+            # Gemini 1.5 (Stable fallbacks - No retirement date)
+            "gemini-1.5-pro",                # Stable production model
+            "gemini-1.5-flash",              # Fast and efficient
+            "gemini-1.5-pro-latest",         # Auto-updated to latest 1.5 pro
+            "gemini-1.5-flash-latest",       # Auto-updated to latest 1.5 flash
+            "gemini-pro",                    # Legacy fallback (last resort)
         ]
         
         # Use configured model or first supported model (no testing during init to avoid timeout)
         self.current_model = settings.gemini_model
         
-        # Try to use a better model if configured one seems outdated
-        if self.current_model in ["gemini-pro", "gemini-1.0-pro"]:
-            logger.warning(f"⚠️ Configured model '{self.current_model}' is deprecated. Using gemini-1.5-pro instead.")
-            self.current_model = "gemini-1.5-pro"
+        # Validate configured model
+        if self.current_model in ["gemini-pro-old", "gemini-1.0-pro"]:
+            logger.warning(f"⚠️ Configured model '{self.current_model}' is deprecated. Using gemini-2.5-pro instead.")
+            self.current_model = "gemini-2.5-pro"
         
         logger.info(f"✅ Initializing with model: {self.current_model}")
+        logger.info(f"📋 Fallback models available: {len(self.supported_models)} models")
         
         # Use premium model with high creativity settings for natural conversation
         self.model = genai.GenerativeModel(
@@ -699,28 +713,75 @@ Respond with ONLY valid JSON in this exact format:
     "extraction_focus": "account_details/verification_codes/personal_info/payment_methods/authority_claims"
 }}
 
+CRITICAL JSON FORMATTING RULES:
+- Use DOUBLE QUOTES for all strings and keys
+- Do NOT use single quotes, backticks, or unquoted strings  
+- Escape any quotes inside strings with backslash: \\"
+- Keep responses on single lines (no line breaks within strings)
+- Ensure ALL braces and brackets are properly closed
+- Do NOT add ANY text before or after the JSON object
+
 MAKE YOUR RESPONSE NATURAL, HUMAN-LIKE, AND STRATEGICALLY DESIGNED TO EXTRACT MAXIMUM INTELLIGENCE."""
 
+            
             # Generate response with very high temperature for maximum creativity
             persona_temp = persona_profile.get("temperature", 0.8)
             
-            # Adjust model settings for this specific response - high creativity
-            dynamic_model = genai.GenerativeModel(
-                self.current_model,
-                generation_config={
-                    "temperature": min(0.95, persona_temp + 0.1),  # Very high but not max
-                    "top_p": 0.98,  # Allow more diverse responses
-                    "top_k": 80,   # Much higher for more variety
-                    "max_output_tokens": 1024,
-                    "candidate_count": 1,
-                }
-            )
+            # Try generating with current model, fallback to alternatives if needed
+            response = None
+            last_error = None
+            models_to_try = [self.current_model] + [m for m in self.supported_models if m != self.current_model]
             
-            # Generate response
-            response = dynamic_model.generate_content(
-                prompt,
-                request_options={'timeout': settings.gemini_timeout}
-            )
+            for attempt, model_name in enumerate(models_to_try, 1):
+                try:
+                    # Adjust model settings for this specific response - high creativity
+                    dynamic_model = genai.GenerativeModel(
+                        model_name,
+                        generation_config={
+                            "temperature": min(0.95, persona_temp + 0.1),  # Very high but not max
+                            "top_p": 0.98,  # Allow more diverse responses
+                            "top_k": 80,   # Much higher for more variety
+                            "max_output_tokens": 1024,
+                            "candidate_count": 1,
+                        }
+                    )
+                    
+                    # Generate response
+                    response = dynamic_model.generate_content(
+                        prompt,
+                        request_options={'timeout': settings.gemini_timeout}
+                    )
+                    
+                    # Success! Update current model if we had to fallback
+                    if attempt > 1:
+                        logger.info(f"✅ Switched to fallback model: {model_name} (attempt {attempt})")
+                        self.current_model = model_name
+                    
+                    break  # Success, exit retry loop
+                    
+                except Exception as e:
+                    last_error = e
+                    error_msg = str(e)
+                    
+                    # Check if it's a model not found error
+                    if "404" in error_msg or "not found" in error_msg.lower():
+                        logger.warning(f"⚠️ Model '{model_name}' not available (attempt {attempt}/{len(models_to_try)}): {error_msg}")
+                        
+                        # Try next model if available
+                        if attempt < len(models_to_try):
+                            logger.info(f"🔄 Trying next fallback model...")
+                            continue
+                        else:
+                            logger.error(f"❌ All {len(models_to_try)} models failed!")
+                            break
+                    else:
+                        # Non-404 error, don't retry
+                        logger.error(f"❌ Error with model '{model_name}': {error_msg}")
+                        break
+            
+            # If all models failed, raise the last error
+            if response is None:
+                raise last_error if last_error else Exception("All models failed to generate response")
             
             # Check if response was blocked by safety filters
             if not response.candidates or not response.candidates[0].content.parts:
@@ -730,17 +791,49 @@ MAKE YOUR RESPONSE NATURAL, HUMAN-LIKE, AND STRATEGICALLY DESIGNED TO EXTRACT MA
             
             response_text = response.text.strip()
             
-            # Parse JSON response with better error handling
+            # Parse JSON response with better error handling and sanitization
             if response_text.startswith("```json"):
                 response_text = response_text.replace("```json", "").replace("```", "").strip()
             elif response_text.startswith("```"):
                 response_text = response_text.replace("```", "").strip()
             
-            # Clean up common JSON formatting issues
-            response_text = re.sub(r'\n\s*', ' ', response_text)  # Remove extra whitespace
-            response_text = re.sub(r'([{,])\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*:', r'\1"\2":', response_text)  # Quote unquoted keys
+            # Comprehensive JSON sanitization for Gemini 3 formatting issues
+            # Remove extra whitespace and newlines that break JSON
+            response_text = re.sub(r'\n\s*', ' ', response_text)
             
-            result = json.loads(response_text)
+            # Fix common JSON formatting issues from Gemini 3
+            # 1. Quote unquoted property names
+            response_text = re.sub(r'([{,])\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*:', r'\1"\2":', response_text)
+            
+            # Try to parse with progressive error handling
+            try:
+                # Try to parse as-is first (might work for simple cases)
+                result = json.loads(response_text)
+            except json.JSONDecodeError:
+                # If that fails, try aggressive cleaning
+                logger.debug("Initial JSON parse failed, attempting cleanup...")
+                
+                # Remove control characters that break JSON
+                response_text = re.sub(r'[\x00-\x1f\x7f-\x9f]', '', response_text)
+                
+                # Try to fix truncated JSON by finding last complete object
+                if not response_text.endswith('}'):
+                    # Find the last occurrence of a complete field
+                    last_comma = response_text.rfind(',')
+                    last_brace = response_text.rfind('}')
+                    if last_brace > last_comma:
+                        response_text = response_text[:last_brace + 1]
+                    elif last_comma > 0:
+                        # Remove incomplete field after last comma
+                        response_text = response_text[:last_comma] + '}'
+                
+                # Try parsing again
+                try:
+                    result = json.loads(response_text)
+                except json.JSONDecodeError as e:
+                    # Still failed - log and re-raise
+                    logger.error(f"JSON parse failed even after cleanup: {e}")
+                    raise
             
             agent_response = result.get("response", "")
             should_continue = result.get("should_continue", True)
