@@ -302,75 +302,61 @@ class AIAgentService:
         """
         Sanitize AI response to remove any JSON structure artifacts.
         Ensures only natural language text is returned to scammers.
+        Enhanced to catch JSON ANYWHERE in the response, not just at the start.
         """
         if not response:
             return response
         
         original_response = response
         
-        # Pattern 1: Full or partial JSON object with proper quotes
-        # Matches: { "response": "text" } or { "response": "text
-        json_pattern = r'^\s*\{\s*["\']?response["\']?\s*:\s*["\'](.+?)["\']\s*(?:,.*?)?\}?\s*$'
-        match = re.match(json_pattern, response, re.DOTALL | re.IGNORECASE)
-        if match:
-            response = match.group(1)
-            logger.warning(f"🧹 Cleaned JSON object (Pattern 1): '{original_response[:40]}...'")
+        # CRITICAL FIX: Remove JSON fragments that appear ANYWHERE in the text
+        # Pattern 1: Remove complete JSON objects anywhere in text
+        # Matches: text { "response": "content" } more text
+        response = re.sub(r'\{[^}]*["\']?response["\']?\s*:\s*["\'][^"\']*["\'][^}]*\}', '', response, flags=re.IGNORECASE)
         
-        # Pattern 2: Malformed JSON with missing closing quote before brace
-        # Matches: { "response": "text} or {"response": "text}
-        malformed_json_pattern = r'^\s*\{\s*["\']?response["\']?\s*:\s*["\'](.+?)\}?\s*$'
-        if not match:
-            match = re.match(malformed_json_pattern, response, re.DOTALL | re.IGNORECASE)
-            if match:
-                response = match.group(1)
-                logger.warning(f"🧹 Cleaned malformed JSON (Pattern 2): '{original_response[:40]}...'")
+        # Pattern 2: Remove partial/malformed JSON anywhere
+        # Matches: text { "response": "content or { "response": content}
+        response = re.sub(r'\{[^}]*["\']?response["\']?\s*:\s*["\'][^}]*', '', response, flags=re.IGNORECASE)
         
-        # Pattern 3: Partial JSON without opening brace
-        # Matches: "response": "text" or response: "text
-        partial_json_pattern = r'^\s*["\']?response["\']?\s*:\s*["\'](.+?)$'
-        if response.startswith('"') or response.startswith('{') or 'response":' in response[:20].lower():
-            match = re.match(partial_json_pattern, response, re.DOTALL | re.IGNORECASE)
-            if match:
-                response = match.group(1)
-                logger.warning(f"🧹 Cleaned partial JSON (Pattern 3): '{original_response[:40]}...'")
+        # Pattern 3: Remove JSON field markers
+        # Matches: { "response": or "response": or response:
+        response = re.sub(r'\{?\s*["\']?response["\']?\s*:\s*["\']?', '', response, flags=re.IGNORECASE)
         
-        # Pattern 4: Remove any remaining curly braces that wrap the entire text
-        response = response.strip()
-        if response.startswith('{') and response.endswith('}'):
-            # Try to extract text between quotes if it looks like JSON
-            if '"' in response or "'" in response:
-                # Extract the longest quoted string
-                quote_pattern = r'["\'](.+?)["\']'
-                matches = re.findall(quote_pattern, response)
-                if matches:
-                    # Filter out JSON keys (response, text, etc.)
-                    json_keys = {'response', 'text', 'message', 'reply', 'should_continue', 'emotional_state', 'internal_notes', 'extraction_focus'}
-                    content_matches = [m for m in matches if m.lower() not in json_keys]
-                    if content_matches:
-                        response = max(content_matches, key=len)
-                        logger.warning(f"🧹 Extracted from wrapped JSON (Pattern 4)")
+        # Pattern 4: Clean up any remaining curly braces with JSON-like content
+        # Only if they look like JSON artifacts (contain colons or quotes nearby)
+        if '{' in response and (':' in response or '"' in response):
+            # Remove any {...} blocks that look like JSON
+            response = re.sub(r'\{[^}]*[:"][^}]*\}', '', response)
+            # Remove standalone opening braces followed by quotes/colons
+            response = re.sub(r'\{\s*["\']', '', response)
         
-        # Pattern 5: Remove JSON field prefixes that might remain
-        field_prefix_pattern = r'^\s*["\']?(?:response|text|message|reply)["\']?\s*:\s*["\']?'
-        response = re.sub(field_prefix_pattern, '', response, flags=re.IGNORECASE)
+        # Pattern 5: Remove trailing/leading JSON artifacts
+        response = re.sub(r'["\']?\s*[,}]\s*$', '', response)  # Trailing
+        response = re.sub(r'^\s*[{"\']', '', response)  # Leading
         
-        # Pattern 6: Clean up JSON artifacts
-        response = response.replace('\\"', '"')  # Unescape quotes
-        response = response.replace('\\n', ' ')  # Replace escaped newlines
+        # Pattern 6: Clean up escaped characters
+        response = response.replace('\\"', '"')
+        response = response.replace('\\n', ' ')
         
-        # Pattern 7: Remove trailing JSON artifacts (quotes, braces, commas)
-        response = re.sub(r'["\']?\s*[,}]\s*$', '', response)
-        response = re.sub(r'^\s*["\']', '', response)  # Remove leading quotes
+        # Pattern 7: Remove empty quotes and extra punctuation
+        response = re.sub(r'["\'][\s]*["\']', '', response)
         
         # Clean up whitespace
         response = ' '.join(response.split())
         response = response.strip()
         
+        # Remove common JSON field names if they somehow remain
+        response = re.sub(r'\b(response|text|message|reply)\b\s*:', '', response, flags=re.IGNORECASE)
+        
+        # Final cleanup: if response is too short or looks broken, use fallback
+        if len(response) < 3 or response in ['{', '}', ':', '"', "'"]:
+            response = "wait a moment"
+        
         # Log if we made changes
         if response != original_response:
-            logger.info(f"🧹 Sanitized response:")
-            logger.info(f"   Before: '{original_response[:60]}...'")
-            logger.info(f"   After:  '{response[:60]}...'")
+            logger.warning(f"🧹 JSON SANITIZATION APPLIED:")
+            logger.warning(f"   BEFORE: '{original_response}'")
+            logger.warning(f"   AFTER:  '{response}'")
         
         return response
     
