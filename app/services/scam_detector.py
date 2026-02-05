@@ -17,13 +17,15 @@ class ScamDetectorService:
     
     def __init__(self):
         # Use premium model with optimized generation config
+        # Use a compact generation configuration for faster detection responses
         self.model = genai.GenerativeModel(
             settings.gemini_model,
             generation_config={
-                "temperature": 0.3,  # Lower for more consistent detection
-                "top_p": 0.95,
+                "temperature": 0.0,  # Deterministic for detection
+                "top_p": 0.9,
                 "top_k": 40,
-                "max_output_tokens": 1024,
+                "max_output_tokens": 200,
+                "candidate_count": 1,
             }
         )
         

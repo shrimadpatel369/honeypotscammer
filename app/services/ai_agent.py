@@ -53,14 +53,16 @@ class AIAgentService:
         logger.info(f"✅ Initializing with model: {self.current_model}")
         logger.info(f"📋 Fallback models available: {len(self.supported_models)} models")
         
-        # Use premium model with high creativity settings for natural conversation
+        # Use faster, lower-latency generation defaults to prioritise responsiveness
+        # (These can be tuned further via settings)
         self.model = genai.GenerativeModel(
             self.current_model,
             generation_config={
-                "temperature": 0.85,  # High temperature for very creative, human-like responses
-                "top_p": 0.95,
-                "top_k": 60,  # Increased for more variety
-                "max_output_tokens": 1024,  # More room for natural, detailed responses
+                "temperature": 0.2,  # Lower temperature for concise, deterministic replies
+                "top_p": 0.9,
+                "top_k": 40,
+                "max_output_tokens": 150,  # Tight output limit for speed
+                "candidate_count": 1,
             }
         )
         
@@ -690,9 +692,10 @@ class AIAgentService:
                     examples_text += f"  Scam type: {ex.get('scam_type', 'unknown')}\n"
                     examples_text += f"  Information extracted: {ex.get('extracted_info', 'none')}\n\n"
             
-            # Build conversation context with better analysis
-            context = "CONVERSATION HISTORY (last 12 messages):\n"
-            for msg in conversation_history[-12:]:
+            # Build conversation context with a short recent window to reduce prompt size
+            max_context_msgs = getattr(settings, 'gemini_context_messages', None) or 4
+            context = f"CONVERSATION HISTORY (last {max_context_msgs} messages):\n"
+            for msg in conversation_history[-max_context_msgs:]:
                 sender = "SCAMMER" if msg.get("sender") == "scammer" else "YOU"
                 text = msg.get("text", "")
                 context += f"{sender}: {text}\n"
@@ -713,8 +716,14 @@ CRITICAL LANGUAGE REQUIREMENT:
 - Use appropriate cultural context for {detected_language} speakers
 - Show emotions and reactions natural to {detected_language} culture
 """
-            
-            prompt = f"""ADVANCED HONEYPOT AGENT - HUMAN BEHAVIORAL SIMULATION
+
+            # System-level concise instructions to keep responses short and avoid meta-text
+            system_instructions = (
+                "SYSTEM: Reply briefly (1-2 short sentences). Do NOT include any meta or progress messages like 'I'm thinking' or 'Let me check'. "
+                "Do NOT claim you are an AI or mention safety filters. Be neutral; do not accuse or state 'you are a scammer'. Keep language natural and concise.\n\n"
+            )
+
+            prompt = f"""{system_instructions}ADVANCED HONEYPOT AGENT - HUMAN BEHAVIORAL SIMULATION
 
 MISSION: Extract maximum intelligence while maintaining perfect human cover.
 {language_instruction}
@@ -812,18 +821,19 @@ MAKE YOUR RESPONSE NATURAL, HUMAN-LIKE, AND STRATEGICALLY DESIGNED TO EXTRACT MA
             for attempt, model_name in enumerate(models_to_try, 1):
                 try:
                     # Adjust model settings for this specific response - high creativity
+                    # Create a faster, concise-generation model configuration to reduce latency
                     dynamic_model = genai.GenerativeModel(
                         model_name,
                         generation_config={
-                            "temperature": min(0.95, persona_temp + 0.1),  # Very high but not max
-                            "top_p": 0.98,  # Allow more diverse responses
-                            "top_k": 80,   # Much higher for more variety
-                            "max_output_tokens": 1024,
+                            "temperature": min(0.4, persona_temp),  # Lower temperature for concise replies
+                            "top_p": 0.9,
+                            "top_k": 40,
+                            "max_output_tokens": 150,
                             "candidate_count": 1,
                         }
                     )
-                    
-                    # Generate response
+
+                    # Generate response (short timeout controlled by settings)
                     response = dynamic_model.generate_content(
                         prompt,
                         request_options={'timeout': settings.gemini_timeout}
