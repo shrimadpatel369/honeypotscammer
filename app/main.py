@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone, UTC
 import logging
 import time
 from pathlib import Path
@@ -389,10 +390,8 @@ async def honeypot_endpoint(request: Request, honeypot_request: HoneypotRequest)
             session["agentNotes"] = f"{session['agentNotes']} | {', '.join(scam_indicators)}"
         
         # Calculate engagement metrics
-        from datetime import timezone
         start_time_session = session["startTime"]
         if isinstance(start_time_session, str):
-            from datetime import datetime
             start_time_session = datetime.fromisoformat(start_time_session.replace('Z', '+00:00'))
         
         # Ensure both timestamps are timezone-aware (UTC)
@@ -432,13 +431,9 @@ async def honeypot_endpoint(request: Request, honeypot_request: HoneypotRequest)
                 callback_success = await send_guvi_callback(
                     session_id=honeypot_request.sessionId,
                     scam_detected=session["scamDetected"],
-                    scam_type=session.get("scamType", "unknown"),
-                    confidence=session.get("scamConfidence", 0.0),
-                    intelligence=session.get("extractedIntelligence", {}),
-                    conversation_history=session["conversationHistory"],
                     total_messages=session["totalMessages"],
-                    start_time=session["startTime"],
-                    end_time=datetime.utcnow().isoformat()
+                    extracted_intelligence=session.get("extractedIntelligence", {}),
+                    agent_notes=session.get("agentNotes", "")
                 )
                 if callback_success:
                     session["callbackSent"] = True
