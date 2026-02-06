@@ -26,14 +26,14 @@ class Settings(BaseSettings):
     mongodb_connect_timeout_ms: int = 5000
     mongodb_server_selection_timeout_ms: int = 5000
     
-    # Google Gemini (Premium)
+    # Google Gemini (Premium) - Optimized for human-like responses
     gemini_api_key: str
-    gemini_model: str = "gemini-2.5-flash-lite"
+    gemini_model: str = "gemini-3-pro-preview"    # Best model first
     gemini_max_retries: int = 3
-    gemini_timeout: int = 30
-    gemini_context_messages: int = 10  # Increased from 4 to prevent repetition
-    gemini_max_output_tokens: int = 250  
-    gemini_temperature: float = 0.75  # Increased from 0.6 for more variety
+    gemini_timeout: int = 35                       # Slight buffer for ~30s target response time
+    gemini_context_messages: int = 10              # Full conversation history to prevent repetition
+    gemini_max_output_tokens: int = 250            # Max 3-4 lines (~87 words), shorter is better
+    gemini_temperature: float = 0.85               # Higher for more natural, human-like variation
     
     # GUVI Callback
     guvi_callback_url: str = "https://hackathon.guvi.in/api/updateHoneyPotFinalResult"

@@ -53,15 +53,16 @@ class AIAgentService:
         logger.info(f"✅ Initializing with model: {self.current_model}")
         logger.info(f"📋 Fallback models available: {len(self.supported_models)} models")
         
-        # Use faster, lower-latency generation defaults to prioritise responsiveness
-        # (These can be tuned further via settings)
+        # Optimized for human-like natural responses with balanced speed
+        # Temperature: Higher for natural variation and personality  
+        # Tokens: Maximum 3-4 lines (~87 words), shorter is fine
         self.model = genai.GenerativeModel(
             self.current_model,
             generation_config={
-                "temperature": 0.6,
-                "top_p": 0.90,
-                "top_k": 100,
-                "max_output_tokens": 250,
+                "temperature": 0.85,      # Increased for more natural, varied responses
+                "top_p": 0.95,            # Higher for more diverse word choices
+                "top_k": 80,              # Optimal balance for natural language
+                "max_output_tokens": 250, # Max 3-4 lines, shorter responses encouraged
                 "candidate_count": 1,
             }
         )
@@ -776,10 +777,13 @@ CRITICAL LANGUAGE REQUIREMENT:
 - Show emotions and reactions natural to {detected_language} culture
 """
 
-            # System-level concise instructions to keep responses short and avoid meta-text
+            # System-level instructions optimized for maximum human-likeness
             system_instructions = (
-                "SYSTEM: Reply briefly (1-2 short sentences). Do NOT include any meta or progress messages like 'I'm thinking' or 'Let me check'. "
-                "Do NOT claim you are an AI or mention safety filters. Be neutral; do not accuse or state 'you are a scammer'. Keep language natural and concise.\n\n"
+                "SYSTEM: You are a real human having a natural text conversation. Write responses that sound like casual spoken text messages - relaxed, conversational, and authentic. "
+                "Keep responses SHORT and natural - maximum 3-4 lines, but 1-2 lines is often better. Be concise like real people texting. "
+                "Use natural language humans actually use when texting: contractions, casual phrasing, simple words. Think like you're texting someone on your phone. "
+                "NEVER use formal business language, robotic phrasing, or overly structured sentences. Do NOT include meta-commentary. "
+                "Do NOT reveal you're an AI, mention filters, or accuse anyone directly. Just be a regular person in a normal conversation.\n\n"
             )
 
             prompt = f"""{system_instructions}ADVANCED HONEYPOT AGENT - HUMAN BEHAVIORAL SIMULATION
@@ -830,19 +834,23 @@ BEHAVIORAL REQUIREMENTS:
 - Express concerns in a way that extracts more details
 - Build trust while gathering intelligence
 
-🚨 CRITICAL ANTI-REPETITION RULES - YOU MUST FOLLOW THESE:
-1. **REVIEW YOUR PREVIOUS RESPONSES** in the conversation history above - what did you already say?
-2. **NEVER** repeat the same question twice (ANY question - about details, clarification, or confirmation)
-3. **NEVER** start responses with the same opening words/phrases as your last 3 responses
-4. **PROGRESS THE CONVERSATION** - Each response should move forward:
-   - First: Ask basic clarifying question (e.g., "Which X?", "What do you mean?")
-   - Next: Acknowledge their answer + express emotion/concern about what they said
-   - Then: Ask about PROCESS/NEXT STEPS or specific details they mentioned
-   - Later: Show skepticism, ask for proof, or request verification
-5. **VARY YOUR RESPONSE STYLE**: Rotate between:
-   - Questions → Statements → Emotional reactions → Requests for help → Expressions of doubt
-6. **EXTRACT & REFERENCE SPECIFICS**: Repeat exact details they mentioned (names, numbers, amounts, times, companies)
-7. **BUILD ON CONTEXT**: React to what they JUST said, not generic templates
+🚨 CRITICAL ANTI-REPETITION RULES - READ THE CONVERSATION HISTORY ABOVE:
+1. **LOOK AT THE FULL CONVERSATION HISTORY ABOVE** - You can see ALL previous messages from both you and the scammer
+2. **NEVER EVER repeat the same question or statement** - Check what YOU already said in the history
+3. **If you asked "Which account?" before, DO NOT ask it again** - Ask something completely different
+4. **Each response MUST be unique** - Different opening, different question, different approach
+5. **PROGRESS THE CONVERSATION FORWARD**:
+   - Messages 1-2: Basic questions ("Which account?", "What do you mean?")
+   - Messages 3-5: Show emotion/concern ("Oh no!", "That's worrying")  
+   - Messages 6-10: Ask about process/details ("How do I do that?", "What's the number?")
+   - Messages 11+: Show skepticism/delay ("Need to verify", "Seems strange")
+6. **VARY YOUR RESPONSE TYPE**: Rotate between questions, statements, emotions, and requests
+7. **REFERENCE SPECIFIC DETAILS** they mentioned: Repeat back exact numbers, names, times they said
+8. **BUILD ON THEIR LAST MESSAGE** - React to what they JUST said, not generic patterns
+
+**THE CONVERSATION HISTORY IS PROVIDED ABOVE - USE IT TO AVOID REPETITION!**
+
+**ABSOLUTELY FORBIDDEN**: Repeating any question/response you already gave (check the "YOU:" messages above)
 
 **Response Progression Pattern** (adapt to ANY scenario):
 - 1st response: Basic question ("What's this about?") ✓
@@ -867,7 +875,7 @@ CRITICAL RULES:
 
 Respond with ONLY valid JSON in this exact format:
 {{
-    "response": "Your natural human response here (vary length: 15-80 words based on persona)",
+    "response": "Your natural human response (MAX 3-4 lines, shorter is often better - like the example shown)",
     "should_continue": true/false,
     "internal_notes": "What intelligence you're trying to extract and strategy",
     "emotional_state": "worried/confused/eager/suspicious/frustrated",
@@ -904,10 +912,10 @@ MAKE YOUR RESPONSE NATURAL, HUMAN-LIKE, AND STRATEGICALLY DESIGNED TO EXTRACT MA
                     dynamic_model = genai.GenerativeModel(
                         model_name,
                         generation_config={
-                            "temperature": effective_temp,  # Use full persona temperature for natural variety
-                            "top_p": 0.95,  # Increased for more diverse responses
-                            "top_k": 60,    # Increased from 40
-                            "max_output_tokens": settings.gemini_max_output_tokens or 250,  # Use config value
+                            "temperature": effective_temp,    # Persona-specific temperature for character consistency
+                            "top_p": 0.95,                    # High diversity for natural language
+                            "top_k": 80,                      # Optimal for varied but coherent responses
+                            "max_output_tokens": settings.gemini_max_output_tokens or 250,  # Max 3-4 lines
                             "candidate_count": 1,
                         }
                     )
