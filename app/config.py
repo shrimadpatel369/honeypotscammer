@@ -32,7 +32,7 @@ class Settings(BaseSettings):
     gemini_max_retries: int = 3
     gemini_timeout: int = 35                       # Slight buffer for ~30s target response time
     gemini_context_messages: int = 10              # Full conversation history to prevent repetition
-    gemini_max_output_tokens: int = 250            # Max 3-4 lines (~87 words), shorter is better
+    gemini_max_output_tokens: int = 1000            # Increased to prevent JSON truncation (content length controlled by prompt)
     gemini_temperature: float = 0.85               # Higher for more natural, human-like variation
     
     # GUVI Callback

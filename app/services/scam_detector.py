@@ -24,7 +24,7 @@ class ScamDetectorService:
                 "temperature": 0.0,  # Deterministic for detection
                 "top_p": 0.9,
                 "top_k": 40,
-                "max_output_tokens": 200,
+                "max_output_tokens": settings.gemini_max_output_tokens,
                 "candidate_count": 1,
             }
         )

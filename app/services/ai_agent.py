@@ -62,7 +62,7 @@ class AIAgentService:
                 "temperature": 0.85,      # Increased for more natural, varied responses
                 "top_p": 0.95,            # Higher for more diverse word choices
                 "top_k": 80,              # Optimal balance for natural language
-                "max_output_tokens": 250, # Max 3-4 lines, shorter responses encouraged
+                "max_output_tokens": settings.gemini_max_output_tokens, # Use config setting (likely 1000)
                 "candidate_count": 1,
             }
         )
@@ -915,7 +915,7 @@ MAKE YOUR RESPONSE NATURAL, HUMAN-LIKE, AND STRATEGICALLY DESIGNED TO EXTRACT MA
                             "temperature": effective_temp,    # Persona-specific temperature for character consistency
                             "top_p": 0.95,                    # High diversity for natural language
                             "top_k": 80,                      # Optimal for varied but coherent responses
-                            "max_output_tokens": settings.gemini_max_output_tokens or 250,  # Max 3-4 lines
+                            "max_output_tokens": settings.gemini_max_output_tokens or 1000,
                             "candidate_count": 1,
                         }
                     )
