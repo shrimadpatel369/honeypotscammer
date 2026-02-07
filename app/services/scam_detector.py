@@ -130,6 +130,34 @@ Analyze comprehensively and respond ONLY with valid JSON:
             # Remove trailing commas before ] or }
             response_text = re.sub(r',(\s*[}\]])', r'\1', response_text)
             
+            # ENHANCED: Try to extract partial JSON fields before parsing (same as ai_agent.py)
+            partial_fields = {}
+            for field in ['is_scam', 'confidence', 'indicators', 'reasoning', 'severity']:
+                # Try to extract each field value
+                if f'"{field}"' in response_text or f"'{field}'" in response_text:
+                    # Boolean fields
+                    if field == 'is_scam':
+                        match = re.search(rf'["\']is_scam["\']\s*:\s*(true|false)', response_text, re.IGNORECASE)
+                        if match:
+                            partial_fields[field] = match.group(1).lower() == 'true'
+                    # Float fields
+                    elif field == 'confidence':
+                        match = re.search(rf'["\']confidence["\']\s*:\s*([\d.]+)', response_text)
+                        if match:
+                            partial_fields[field] = float(match.group(1))
+                    # Array fields
+                    elif field == 'indicators':
+                        match = re.search(rf'["\']indicators["\']\s*:\s*\[([^\]]*)', response_text)
+                        if match:
+                            # Extract array items
+                            items = re.findall(r'["\']([^"\']+)["\']', match.group(1))
+                            partial_fields[field] = items
+                    # String fields
+                    else:
+                        match = re.search(rf'["\']' + field + rf'["\']\s*:\s*["\']([^"\']*)', response_text)
+                        if match:
+                            partial_fields[field] = match.group(1)
+            
             try:
                 result = json.loads(response_text)
             except json.JSONDecodeError:
@@ -138,9 +166,34 @@ Analyze comprehensively and respond ONLY with valid JSON:
                 if json_match:
                     response_text = json_match.group(0)
                     response_text = re.sub(r',(\s*[}\]])', r'\1', response_text)
-                    result = json.loads(response_text)
+                    try:
+                        result = json.loads(response_text)
+                    except json.JSONDecodeError:
+                        # RECOVERY: Use partial fields if we extracted any
+                        if partial_fields:
+                            logger.warning(f"⚠️ JSON truncated. Using {len(partial_fields)} extracted fields: {list(partial_fields.keys())}")
+                            result = {
+                                'is_scam': partial_fields.get('is_scam', False),
+                                'confidence': partial_fields.get('confidence', 0.0),
+                                'indicators': partial_fields.get('indicators', []),
+                                'reasoning': partial_fields.get('reasoning', 'Recovered from truncated JSON'),
+                                'severity': partial_fields.get('severity', 'low')
+                            }
+                        else:
+                            raise
                 else:
-                    raise
+                    # FINAL RECOVERY: Use partial fields or raise
+                    if partial_fields:
+                        logger.warning(f"⚠️ No JSON structure found. Using {len(partial_fields)} extracted fields.")
+                        result = {
+                            'is_scam': partial_fields.get('is_scam', False),
+                            'confidence': partial_fields.get('confidence', 0.0),
+                            'indicators': partial_fields.get('indicators', []),
+                            'reasoning': partial_fields.get('reasoning', 'Recovered from malformed response'),
+                            'severity': partial_fields.get('severity', 'low')
+                        }
+                    else:
+                        raise
             
             is_scam = result.get("is_scam", False)
             confidence = result.get("confidence", 0.0)

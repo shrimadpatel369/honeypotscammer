@@ -979,6 +979,16 @@ MAKE YOUR RESPONSE NATURAL, HUMAN-LIKE, AND STRATEGICALLY DESIGNED TO EXTRACT MA
             # 1. Quote unquoted property names
             response_text = re.sub(r'([{,])\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*:', r'\1"\2":', response_text)
             
+            # ENHANCED: Try to extract partial response from malformed JSON BEFORE parsing
+            partial_response_extracted = None
+            if '"response"' in response_text or "'response'" in response_text:
+                # Try to extract the response field value even if JSON is incomplete
+                # Pattern: "response": "some text (may be incomplete)
+                response_match = re.search(r'["\']response["\']\s*:\s*["\']([^"\']*)', response_text)
+                if response_match:
+                    partial_response_extracted = response_match.group(1)
+                    logger.debug(f"Extracted partial response from malformed JSON: '{partial_response_extracted}'")
+            
             # Try to parse with progressive error handling
             try:
                 # Try to parse as-is first (might work for simple cases)
@@ -1000,14 +1010,37 @@ MAKE YOUR RESPONSE NATURAL, HUMAN-LIKE, AND STRATEGICALLY DESIGNED TO EXTRACT MA
                     elif last_comma > 0:
                         # Remove incomplete field after last comma
                         response_text = response_text[:last_comma] + '}'
+                    else:
+                        # CRITICAL FIX: If we can't fix the JSON structure, but we extracted a partial response,
+                        # create a minimal valid JSON with it
+                        if partial_response_extracted and len(partial_response_extracted) > 3:
+                            logger.warning(f"⚠️ JSON severely truncated. Using extracted partial response: '{partial_response_extracted}'")
+                            response_text = json.dumps({
+                                "response": partial_response_extracted,
+                                "should_continue": True,
+                                "internal_notes": "Recovered from truncated JSON",
+                                "emotional_state": "neutral",
+                                "extraction_focus": "general"
+                            })
                 
                 # Try parsing again
                 try:
                     result = json.loads(response_text)
                 except json.JSONDecodeError as e:
-                    # Still failed - log and re-raise
-                    logger.error(f"JSON parse failed even after cleanup: {e}")
-                    raise
+                    # FINAL ATTEMPT: If we have a partial response, use it
+                    if partial_response_extracted and len(partial_response_extracted) > 3:
+                        logger.warning(f"⚠️ JSON parse failed completely. Using partial extracted response.")
+                        result = {
+                            "response": partial_response_extracted,
+                            "should_continue": True,
+                            "internal_notes": "Recovered from severely truncated JSON",
+                            "emotional_state": "neutral",
+                            "extraction_focus": "general"
+                        }
+                    else:
+                        # No partial response available - log and re-raise for fallback handler
+                        logger.error(f"JSON parse failed even after cleanup: {e}")
+                        raise
             
             agent_response = result.get("response", "")
             should_continue = result.get("should_continue", True)
@@ -1169,14 +1202,37 @@ MAKE YOUR RESPONSE NATURAL, HUMAN-LIKE, AND STRATEGICALLY DESIGNED TO EXTRACT MA
             logger.error(f"Response text: {response_text}")
             # Try to extract plain text response from malformed JSON
             try:
-                # Sometimes Gemini returns just the response without JSON wrapper
-                if response_text and len(response_text) > 10:
-                    # Use the raw text as response
-                    agent_response = self._generate_human_like_variations(response_text[:200], persona_profile, detected_language)
-                    logger.info(f"🔧 Using raw response after JSON parse failure: {agent_response}")
-                    return agent_response, True
-            except:
-                pass
+                # IMPROVED: Check if we can extract usable text from the response
+                clean_text = None
+                
+                # First try: extract from partial "response" field
+                if '"response"' in response_text or "'response'" in response_text:
+                    response_match = re.search(r'["\']response["\']\s*:\s*["\']([^"\']+)', response_text)
+                    if response_match:
+                        clean_text = response_match.group(1)
+                        logger.info(f"🔧 Extracted text from partial 'response' field: {clean_text}")
+                
+                # Second try: if response_text looks like plain text (no JSON artifacts)
+                if not clean_text and response_text and '{' not in response_text[:20]:
+                    clean_text = response_text
+                    logger.info(f"🔧 Using plain text response: {clean_text}")
+                
+                # Only use extracted/cleaned text if it's meaningful (not JSON fragments)
+                if clean_text and len(clean_text) > 5:
+                    # Sanitize to remove any JSON artifacts
+                    clean_text = self._sanitize_response(clean_text)
+                    
+                    # Make sure it doesn't look like broken JSON
+                    if not any(marker in clean_text for marker in ['{', '}', '"response"', ':', 'null']):
+                        agent_response = self._generate_human_like_variations(
+                            clean_text[:200], 
+                            persona_profile, 
+                            detected_language
+                        )
+                        logger.info(f"🔧 Using cleaned response after JSON parse failure: {agent_response}")
+                        return agent_response, True
+            except Exception as ex:
+                logger.warning(f"Failed to extract clean text from malformed response: {ex}")
             # Final fallback
             return self._fallback_response(current_message, context_analysis["message_count"], detected_language, persona_profile)
         except Exception as e:
