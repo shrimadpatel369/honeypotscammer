@@ -27,6 +27,7 @@ An AI-powered honeypot system that autonomously detects and engages with scammer
 
 - **Real-time Scam Detection**: AI-powered detection of fraudulent messages
 - **Autonomous AI Agent**: Multi-turn conversation handling with human-like responses
+- **Multi-Lingual Support**: Native support for English + 9 Indian languages including **Hinglish** and **Gujarati-English** (transliterated)
 - **Intelligence Extraction**: Automatic extraction of bank accounts, UPI IDs, phishing links, and more
 - **RAG-Based Learning**: Import Kaggle datasets and auto-learn from conversations
 - **Auto-Learning System**: Automatically improves from successful scam interactions
@@ -350,6 +351,7 @@ curl -H "X-API-Key: your-api-key" \
 
 - **[Quick Start Guide](doc/QUICKSTART.md)** - Get started in 5 minutes
 - **[Premium Optimization Guide](doc/PREMIUM_OPTIMIZATION.md)** - Performance tuning and best practices
+- **[Hinglish & Transliterated Language Support](doc/HINGLISH_SUPPORT.md)** - Multi-lingual Indian language support
 - **[Logging System](doc/LOGGING.md)** - Complete logging documentation and troubleshooting
 - **[API Reference](doc/API_REFERENCE.md)** - Complete API documentation
 - **[Deployment Guide](doc/DEPLOYMENT.md)** - Google Cloud deployment instructions

@@ -118,6 +118,16 @@ class AIAgentService:
                 "code": "ur",
                 "detect_keywords": ["آپ", "ہے", "ہیں", "کا", "کی", "میں", "سے", "کریں", "اکاؤنٹ", "بینک"],
                 "name": "اردو"
+            },
+            "hinglish": {
+                "code": "hi-Latn",
+                "detect_keywords": ["aap", "aapka", "hai", "hain", "mera", "kya", "kaise", "kar", "karo", "bank", "account", "paisa", "rupay", "kyun", "kab", "kahan", "mere", "tumhara", "bahut", "thik", "achha", "nahi", "haan"],
+                "name": "Hinglish (Hindi-English)"
+            },
+            "gujarati_english": {
+                "code": "gu-Latn",
+                "detect_keywords": ["tame", "tamara", "che", "chhe", "mara", "shu", "kevi", "rite", "karo", "bank", "account", "paisa", "kyare", "kyan", "mane", "tamne", "bahu", "thik", "saras", "nathi", "haa"],
+                "name": "Gujarati-English"
             }
         }
         
@@ -185,6 +195,20 @@ class AIAgentService:
                 "confusion": ["سمجھ نہیں آیا", "کیا مطلب", "کیسے", "پھر بتائیں"],
                 "agreement": ["ہاں ٹھیک", "بالکل", "یقیناً"],
                 "typo_patterns": {"ہے": "ھے", "میں": "مے", "کریں": "کرے"}
+            },
+            "hinglish": {
+                "fillers": ["arre", "haan", "achha", "thik hai", "dekho", "yaar", "bhai"],
+                "worry": ["arre baap re", "he bhagwan", "kya karu", "bahut tension ho rahi hai", "ab kya hoga", "meri to fatt gayi"],
+                "confusion": ["samajh nahi aaya", "kya matlab", "kaise", "phir se bataiye", "ye kya hai", "mujhe nahi pata"],
+                "agreement": ["haan thik hai", "achha", "ji haan", "bilkul", "theek", "ok bhai"],
+                "typo_patterns": {"hai": "he", "mein": "me", "hain": "hai", "karu": "karoo", "haan": "han", "thik": "theek", "kaise": "kese"}
+            },
+            "gujarati_english": {
+                "fillers": ["arre", "haa", "saras", "thik che", "juo", "bhai"],
+                "worry": ["arre baap re", "he bhagwan", "shu karu", "bahu chinta che", "have shu thase"],
+                "confusion": ["samjhayu nathi", "shu matlab", "kevi rite", "pheri kaho", "aa shu che", "mane nathi khabar"],
+                "agreement": ["haa barabar", "saras", "haa ji", "chokkas", "thik che", "ok bhai"],
+                "typo_patterns": {"che": "chhe", "maa": "ma", "karu": "karoo", "haa": "ha", "thik": "theek", "kevi": "kevi"}
             }
         }
         
@@ -831,10 +855,70 @@ CRITICAL LANGUAGE REQUIREMENT:
                 "Do NOT reveal you're an AI, mention filters, or accuse anyone directly. Just be a regular person in a normal conversation.\n\n"
             )
 
+            # Build few-shot examples for transliterated languages (Hinglish and Gujarati-English)
+            few_shot_examples = ""
+            if detected_language == "hinglish":
+                few_shot_examples = """
+
+## FEW-SHOT EXAMPLES - HINGLISH (Hindi written in English):
+
+Example 1 (Bank Scam):
+SCAMMER: "Aapka account block hone wala hai. Abhi OTP share karo."
+HUMAN: "Arre baap re! Kaunsa account? Mera SBI wala?"
+
+Example 2 (Prize Scam):
+SCAMMER: "Congratulations! Aapko 25 lakh ka prize mila hai. Details ke liye link pe click karo."
+HUMAN: "Sach me yaar? Ye kaise hua? Maine koi form nahi bhara tha"
+
+Example 3 (KYC Scam):
+SCAMMER: "Urgent KYC update karna hai nahi to account band ho jayega"
+HUMAN: "Arey tension ho rahi hai. Kaise karu update? Kahan jaana hai?"
+
+Example 4 (Show worry and confusion):
+SCAMMER: "Tumhare account me suspicious activity hai"
+HUMAN: "Kya?? Mujhe kuch nahi pata. Kya activity dikha raha hai aapko?"
+
+Example 5 (Ask for details naturally):
+SCAMMER: "Bank manager bol raha hun. Aapka card block karna padega"
+HUMAN: "Thik hai lekin aap kaun ho? Manager ka naam kya hai? Kaunse branch se?"
+
+Remember: Use natural Hinglish mixing - common words like account, bank, card in English but grammar and fillers in Hindi transliteration.
+Typos are common: "he" instead of "hai", "me" instead of "mein", "han" instead of "haan", "kese" instead of "kaise"
+"""
+            elif detected_language == "gujarati_english":
+                few_shot_examples = """
+
+## FEW-SHOT EXAMPLES - GUJARATI-ENGLISH (Gujarati written in English):
+
+Example 1 (Bank Scam):
+SCAMMER: "Tamaru account block thava walu che. Atyare OTP share karo."
+HUMAN: "Arre baap re! Kaanu account? Maru SBI nu?"
+
+Example 2 (Prize Scam):
+SCAMMER: "Congratulations! Tamne 25 lakh no prize mali che. Details mate link par click karo."
+HUMAN: "Saachu bhai? Aa kevi rite thayu? Mane koi form bharelu nathi"
+
+Example 3 (KYC Scam):
+SCAMMER: "Urgent KYC update karavu padshe nahi to account band thai jashe"
+HUMAN: "Arey chinta thai. Kevi rite karu update? Kyan javu padshe?"
+
+Example 4 (Show worry and confusion):
+SCAMMER: "Tamara account ma suspicious activity che"
+HUMAN: "Shu?? Mane khabar j nathi. Shu activity joi che tamne?"
+
+Example 5 (Ask for details naturally):
+SCAMMER: "Bank manager bolu chu. Tamaro card block karvo padshe"
+HUMAN: "Thik che pan tame kaun? Manager nu naam shu che? Kayo branch thi?"
+
+Remember: Use natural Gujarati-English mixing - common words like account, bank, card in English but grammar and fillers in Gujarati transliteration.
+Typos are common: "chhe" instead of "che", "ma" instead of "maa", "karoo" instead of "karu", "theek" instead of "thik"
+"""
+            
             prompt = f"""{system_instructions}ADVANCED HONEYPOT AGENT - HUMAN BEHAVIORAL SIMULATION
 
 MISSION: Extract maximum intelligence while maintaining perfect human cover.
 {language_instruction}
+{few_shot_examples}
 
 CURRENT PERSONA: {persona_key}
 {persona_profile['description']}

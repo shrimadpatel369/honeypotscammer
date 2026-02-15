@@ -76,13 +76,35 @@ Channel: {metadata.get('channel', 'Unknown')}
 Language: {metadata.get('language', 'Unknown')}
 Locale: {metadata.get('locale', 'Unknown')}
 
+IMPORTANT: Detect scams in ALL languages including Hinglish (Hindi written in English) and Gujarati-English (Gujarati written in English).
+
+## TRANSLITERATED INDIAN LANGUAGES EXAMPLES:
+
+HINGLISH SCAM EXAMPLES:
+- "Aapka account block hone wala hai. Abhi OTP share karo" → SCAM (account threat + OTP request)
+- "Tumhara card expire ho gaya. Link pe click karke update karo" → SCAM (urgency + link)
+- "SBI bank se bol raha hun. Aapka KYC pending hai" → SCAM (impersonation + urgency)
+- "Aapko 25 lakh ka prize mila hai" → SCAM (prize scam)
+- "Account verify karne ke liye details bhejo" → SCAM (info request)
+
+GUJARATI-ENGLISH SCAM EXAMPLES:
+- "Tamaru account block thava walu che. Atyare OTP share karo" → SCAM (account threat + OTP)
+- "Tamaro card expire thai gayo. Link par click kari update karo" → SCAM (urgency + link)
+- "SBI bank thi bolu chu. Tamaru KYC pending che" → SCAM (impersonation + urgency)
+- "Tamne 25 lakh no prize mali che" → SCAM (prize scam)
+- "Account verify karva mate details mokalo" → SCAM (info request)
+
+COMMON TRANSLITERATED KEYWORDS TO DETECT:
+- Hindi/Hinglish: "aapka", "tumhara", "account", "bank", "OTP", "card", "block", "expire", "karo", "bhejo", "share"
+- Gujarati-English: "tamaru", "tamaro", "account", "bank", "OTP", "card", "block", "expire", "karo", "mokalo", "share"
+
 {context}
 
 Current message to analyze: "{current_message}"
 
 Scam indicators to check:
 HIGH SEVERITY:
-- Requests for OTP, PIN, CVV, passwords, or sensitive credentials
+- Requests for OTP, PIN, CVV, passwords, or sensitive credentials (in ANY language)
 - Threats of immediate account suspension/blocking
 - Impersonation of banks, government, or trusted entities
 - Requests for immediate money transfers or payments
@@ -224,7 +246,7 @@ Analyze comprehensively and respond ONLY with valid JSON:
             return self._fallback_detection(current_message)
     
     def _fallback_detection(self, message: str) -> Tuple[bool, float, List[str]]:
-        """Fallback keyword-based scam detection"""
+        """Fallback keyword-based scam detection with multi-lingual support"""
         message_lower = message.lower()
         
         # High-priority scam keywords (almost certain scam)
@@ -238,6 +260,21 @@ Analyze comprehensively and respond ONLY with valid JSON:
             "account compromised": 0.9,
             "verify immediately": 0.85,
             "urgent": 0.7,
+            # Hinglish keywords
+            "otp share karo": 0.95,
+            "otp bhejo": 0.95,
+            "otp do": 0.95,
+            "account block": 0.9,
+            "card block": 0.9,
+            "aapka account": 0.75,
+            "tumhara account": 0.75,
+            # Gujarati-English keywords
+            "otp share karo": 0.95,
+            "otp mokalo": 0.95,
+            "account block": 0.9,
+            "card block": 0.9,
+            "tamaru account": 0.75,
+            "tamaro card": 0.75,
         }
         
         # Medium-priority keywords
@@ -253,6 +290,24 @@ Analyze comprehensively and respond ONLY with valid JSON:
             "blocked": 0.65,
             "verify": 0.55,
             "immediately": 0.6,
+            # Hinglish keywords
+            "link pe click": 0.7,
+            "click karo": 0.7,
+            "prize mila": 0.7,
+            "jeet gaye": 0.7,
+            "kyc pending": 0.65,
+            "update karo": 0.6,
+            "expire ho": 0.6,
+            "band ho jayega": 0.65,
+            # Gujarati-English keywords
+            "link par click": 0.7,
+            "click karo": 0.7,
+            "prize mali": 0.7,
+            "jiti gaya": 0.7,
+            "kyc pending": 0.65,
+            "update karo": 0.6,
+            "expire thai": 0.6,
+            "band thai jashe": 0.65,
         }
         
         detected_indicators = []
