@@ -90,6 +90,7 @@ class ExtractedIntelligence(BaseModel):
     upiIds: List[str] = Field(default_factory=list)
     phishingLinks: List[str] = Field(default_factory=list)
     phoneNumbers: List[str] = Field(default_factory=list)
+    emailAddresses: List[str] = Field(default_factory=list)
     suspiciousKeywords: List[str] = Field(default_factory=list)
 
 

@@ -12,8 +12,10 @@ class IntelligenceExtractorService:
         # Regex patterns for various intelligence types
         self.patterns = {
             "bank_account": [
-                r'\b\d{9,18}\b',  # 9-18 digit account numbers
-                r'\b\d{4}[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4}\b',  # Formatted account numbers
+                r'\b\d{8,20}\b',  # 8-20 digit account numbers (standard globally)
+                r'\b\d{4}[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4}\b',  # Formatted 16-digit accounts
+                r'\b\d{2,4}[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{2,6}\b',  # Various formatted patterns
+                r'[A-Z]{2}\d{2}[A-Z0-9]{10,30}',  # IBAN format
             ],
             "upi_id": [
                 r'\b[\w\.-]+@[\w\.-]+\b',  # UPI ID format (looks like email)
@@ -23,11 +25,16 @@ class IntelligenceExtractorService:
                 r'https?://[^\s]+',  # Any HTTP(S) URL
                 r'www\.[^\s]+',  # www. URLs
                 r'\b[\w-]+\.(?:com|net|org|in|xyz|tk|ml|ga|cf|gq)[^\s]*',  # Domain patterns
+                r'bit\.ly/[^\s]+',  # Shortened URLs (bit.ly)
+                r'tinyurl\.com/[^\s]+',  # Shortened URLs (tinyurl)
             ],
             "phone_number": [
-                r'\+?\d{1,3}[-.\s]?\(?\d{1,4}\)?[-.\s]?\d{1,4}[-.\s]?\d{1,9}',  # International format
-                r'\b[6-9]\d{9}\b',  # Indian mobile numbers
-                r'\+91[-.\s]?[6-9]\d{9}\b',  # Indian mobile with country code
+                r'\+?\d{1,4}[-.\s]?\(?\d{1,4}\)?[-.\s]?\d{1,4}[-.\s]?\d{1,9}',  # International format (flexible)
+                r'\b\d{10,15}\b',  # Direct 10-15 digit numbers
+                r'\(\d{3}\)[-.\s]?\d{3}[-.\s]?\d{4}',  # US format (555) 123-4567
+            ],
+            "email_address": [
+                r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b',  # Standard email format
             ],
             "suspicious_keywords": [
                 r'\b(?:urgent|immediately|expire|suspend|block|verify|confirm|activate|update|secure|alert|warning|limited time|act now|last chance)\b',
@@ -56,6 +63,7 @@ class IntelligenceExtractorService:
                 "upiIds": list(set(current_extraction.get("upiIds", []))),
                 "phishingLinks": list(set(current_extraction.get("phishingLinks", []))),
                 "phoneNumbers": list(set(current_extraction.get("phoneNumbers", []))),
+                "emailAddresses": list(set(current_extraction.get("emailAddresses", []))),
                 "suspiciousKeywords": list(set(current_extraction.get("suspiciousKeywords", []))),
             }
             
@@ -69,7 +77,8 @@ class IntelligenceExtractorService:
                         matches = re.findall(pattern, text, re.IGNORECASE)
                         for match in matches:
                             cleaned = match.replace(" ", "").replace("-", "")
-                            if len(cleaned) >= 9:  # Valid account number length
+                            # Standard bank accounts: 8-34 digits (IBAN can be up to 34 chars)
+                            if len(cleaned) >= 8 and (cleaned.isdigit() or re.match(r'^[A-Z]{2}\d{2}[A-Z0-9]+$', cleaned)):
                                 intelligence["bankAccounts"].append(match)
                     
                     # Extract UPI IDs
@@ -98,9 +107,20 @@ class IntelligenceExtractorService:
                     for pattern in self.patterns["phone_number"]:
                         matches = re.findall(pattern, text, re.IGNORECASE)
                         for match in matches:
-                            cleaned = re.sub(r'[^\d+]', '', match)
-                            if len(cleaned) >= 10:  # Valid phone number length
+                            cleaned = re.sub(r'[^\d]', '', match)  # Remove all non-digits
+                            # Standard phone numbers: 7-15 digits (international standard)
+                            if 7 <= len(cleaned) <= 15:
                                 intelligence["phoneNumbers"].append(match)
+                    
+                    # Extract email addresses
+                    for pattern in self.patterns["email_address"]:
+                        matches = re.findall(pattern, text, re.IGNORECASE)
+                        for match in matches:
+                            # Filter out UPI IDs that were already captured
+                            if not any(upi_provider in match.lower() for upi_provider in 
+                                      ['@paytm', '@ybl', '@okicici', '@oksbi', '@okhdfcbank', 
+                                       '@okaxis', '@upi', '@apl', '@axl', '@ibl', '@waicici']):
+                                intelligence["emailAddresses"].append(match)
                     
                     # Extract suspicious keywords
                     for pattern in self.patterns["suspicious_keywords"]:
