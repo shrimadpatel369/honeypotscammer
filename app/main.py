@@ -402,6 +402,9 @@ async def honeypot_endpoint(request: Request, honeypot_request: HoneypotRequest)
             "totalMessagesExchanged": session["totalMessages"]
         }
         
+        # Save metrics to session for callback monitor
+        session["engagementMetrics"] = engagement_metrics
+        
         # Check if conversation should end
         if not should_continue or session["totalMessages"] >= 30:  # Max 30 messages
             session["status"] = "completed"
