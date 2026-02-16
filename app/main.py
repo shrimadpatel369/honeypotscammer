@@ -23,7 +23,7 @@ from app.services.training_manager import training_manager
 from app.services.callback_monitor import callback_monitor
 from app.utils.callback import send_guvi_callback, get_callback_response, get_all_callback_responses
 from app.cache import cache
-from app.routes import training
+
 from app.logger import (
     setup_logging,
     log_request,
@@ -90,7 +90,7 @@ app.add_middleware(
 )
 
 # Register training routes
-app.include_router(training.router)
+
 
 
 # Request logging middleware
@@ -221,14 +221,7 @@ async def message_endpoint(request: Request):
         )
 
 
-@app.post("/api/v1/messages/incoming")
-@limiter.limit(f"{settings.rate_limit_per_minute}/minute")
-async def messages_incoming(request: Request, honeypot_request: HoneypotRequest):
-    """
-    Simplified endpoint for frontend testing
-    Maps to the main honeypot endpoint
-    """
-    return await honeypot_endpoint(request, honeypot_request)
+
 
 
 @app.post(
