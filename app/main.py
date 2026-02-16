@@ -426,6 +426,7 @@ async def honeypot_endpoint(request: Request, honeypot_request: HoneypotRequest)
                     scam_detected=session["scamDetected"],
                     total_messages=session["totalMessages"],
                     extracted_intelligence=session.get("extractedIntelligence", {}),
+                    engagement_metrics=engagement_metrics,
                     agent_notes=session.get("agentNotes", "")
                 )
                 if callback_success:

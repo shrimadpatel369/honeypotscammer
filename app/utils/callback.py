@@ -13,6 +13,7 @@ async def send_guvi_callback(
     scam_detected: bool,
     total_messages: int,
     extracted_intelligence: Dict[str, Any],
+    engagement_metrics: Dict[str, int],
     agent_notes: str
 ) -> bool:
     """
@@ -28,6 +29,7 @@ async def send_guvi_callback(
         scam_detected: Whether scam was detected
         total_messages: Total number of messages exchanged
         extracted_intelligence: All extracted intelligence
+        engagement_metrics: Metrics about engagement duration and quantity
         agent_notes: Summary of scammer behavior
         
     Returns:
@@ -36,7 +38,7 @@ async def send_guvi_callback(
     try:
         # Log function invocation
         logger.info(f"🔔 GUVI callback function triggered for session: {session_id}")
-        logger.debug(f"Callback params - scam_detected: {scam_detected}, total_messages: {total_messages}")
+        logger.debug(f"Callback params - scam_detected: {scam_detected}, metrics: {engagement_metrics}")
         
         # ✅ ONLY send callback if scam is confirmed
         if not scam_detected:
@@ -54,6 +56,7 @@ async def send_guvi_callback(
             "sessionId": session_id,
             "scamDetected": scam_detected,
             "totalMessagesExchanged": total_messages,
+            "engagementMetrics": engagement_metrics,
             "extractedIntelligence": {
                 "bankAccounts": extracted_intelligence.get("bankAccounts", []),
                 "upiIds": extracted_intelligence.get("upiIds", []),
