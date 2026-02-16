@@ -155,6 +155,7 @@ class IntelligenceExtractorService:
             "upiIds": 0.3,
             "phishingLinks": 0.2,
             "phoneNumbers": 0.1,
+            "emailAddresses": 0.1,
             "suspiciousKeywords": 0.1,
         }
         

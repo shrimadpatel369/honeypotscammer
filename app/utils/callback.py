@@ -59,6 +59,7 @@ async def send_guvi_callback(
                 "upiIds": extracted_intelligence.get("upiIds", []),
                 "phishingLinks": extracted_intelligence.get("phishingLinks", []),
                 "phoneNumbers": extracted_intelligence.get("phoneNumbers", []),
+                "emailAddresses": extracted_intelligence.get("emailAddresses", []),
                 "suspiciousKeywords": extracted_intelligence.get("suspiciousKeywords", [])
             },
             "agentNotes": agent_notes
