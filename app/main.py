@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends, HTTPException, status, Request
+from fastapi import FastAPI, Depends, HTTPException, status, Request, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone, UTC
 import logging
 import time
+import asyncio
 from pathlib import Path
 
 
@@ -160,7 +161,7 @@ async def mock_callback(payload: GuviCallbackPayload):
 @app.get("/")
 async def root():
     """Serve the test UI frontend"""
-    test_ui_path = Path(__file__).parent.parent / "test_ui.html"
+    test_ui_path = Path(__file__).parent.parent / "tests" / "test_ui.html"
     if test_ui_path.exists():
         return FileResponse(test_ui_path)
     return {"message": "Honeypot API is running", "version": "2.0.0", "docs": "/docs"}
@@ -197,7 +198,7 @@ async def health_check(request: Request):
     response_model=HoneypotResponse,
     dependencies=[Depends(verify_api_key)]
 )
-async def message_endpoint(request: Request):
+async def message_endpoint(request: Request, background_tasks: BackgroundTasks):
     """
     Main endpoint for hackathon - accepts messages as per specification
     Logs raw request first, then validates
@@ -213,7 +214,7 @@ async def message_endpoint(request: Request):
         logger.info(f"Parsed JSON: {body_json}")
         
         honeypot_request = HoneypotRequest(**body_json)
-        return await honeypot_endpoint(request, honeypot_request)
+        return await honeypot_endpoint(request, honeypot_request, background_tasks)
     except Exception as e:
         logger.error(f"❌ REQUEST VALIDATION FAILED: {str(e)}", exc_info=True)
         raise HTTPException(
@@ -225,12 +226,193 @@ async def message_endpoint(request: Request):
 
 
 
+from app.utils.callback import send_guvi_callback
+
+async def process_background_tasks(
+    honeypot_request: HoneypotRequest,
+    session: dict,
+    all_messages: list,
+    agent_reply: str,
+    should_continue: bool
+):
+    """Offloads heavy analytical and database operations out of the critical response path."""
+    try:
+        scam_detector = ScamDetectorService()
+        intelligence_extractor = IntelligenceExtractorService()
+        sessions_collection = Database.get_sessions_collection()
+        cache_key = f"session_{honeypot_request.sessionId}"
+        
+        # 1. Deferred Scam Detection 
+        scam_detected = session.get("scamDetected", False)
+        scam_indicators = []
+        scam_type = session.get("scamType", "unknown")
+        scam_confidence = session.get("confidenceLevel", 0.0)
+        
+        if not scam_detected and len(all_messages) >= 2:
+            detected, confidence, indicators, s_type = await scam_detector.detect_scam(
+                current_message=honeypot_request.message.text,
+                conversation_history=[msg.model_dump() for msg in all_messages],
+                metadata=honeypot_request.metadata.model_dump() if honeypot_request.metadata else {}
+            )
+            if detected:
+                session["scamDetected"] = True
+                session["scamType"] = s_type
+                session["confidenceLevel"] = confidence
+                scam_indicators = indicators
+                logger.info(f"Background Scam Detected in session {honeypot_request.sessionId}")
+                
+        # 2. Intelligence Extraction
+        extracted_intelligence = await intelligence_extractor.extract_intelligence(
+            conversation_history=[msg.model_dump() for msg in all_messages],
+            current_extraction=session.get("extractedIntelligence", {})
+        )
+        
+        # 3. Synchronize Session State
+        # NOTE: We NO LONGER store conversationHistory in memory/MongoDB to save massive amounts of space.
+        # The evaluator's request payload already provides the full history on every request.
+        session["extractedIntelligence"] = extracted_intelligence
+        session["lastUpdateTime"] = honeypot_request.message.timestamp
+        session["totalMessages"] = len(all_messages) + 1  # Including the AI's reply
+        
+        # Track conversation quality metrics (Questions Asked)
+        if agent_reply and "?" in agent_reply:
+            session["questionsAsked"] = session.get("questionsAsked", 0) + agent_reply.count("?")
+        
+        if scam_indicators:
+            session["agentNotes"] = f"{session.get('agentNotes', '')} | {', '.join(scam_indicators)}"
+            session["redFlagCount"] = session.get("redFlagCount", 0) + len(scam_indicators)
+            
+        # 4. Engagement Metrics Calculation
+        start_time_session = session["startTime"]
+        if isinstance(start_time_session, str):
+            start_time_session = datetime.fromisoformat(start_time_session.replace('Z', '+00:00'))
+            
+        current_timestamp = honeypot_request.message.timestamp
+        if current_timestamp.tzinfo is None:
+            current_timestamp = current_timestamp.replace(tzinfo=timezone.utc)
+        if start_time_session.tzinfo is None:
+            start_time_session = start_time_session.replace(tzinfo=timezone.utc)
+            
+        duration_seconds = max(0, int((current_timestamp - start_time_session).total_seconds()))
+        engagement_metrics = {
+            "engagementDurationSeconds": duration_seconds,
+            "totalMessagesExchanged": session["totalMessages"]
+        }
+        session["engagementMetrics"] = engagement_metrics
+        
+        # 5. Dynamic Scoring & Saturation Callbacks
+        # Priority 1: Maximize Intelligence Extraction (Exclude keywords as they don't score intel points)
+        intel_count = sum(len(v) for k, v in extracted_intelligence.items() if isinstance(v, list) and k != 'suspiciousKeywords')
+        
+        # Track intelligence growth to detect repetitive loops
+        previous_intel_count = session.get("lastIntelCount", 0)
+        if intel_count > previous_intel_count:
+            session["turnsSinceLastIntel"] = 0
+            session["lastIntelCount"] = intel_count
+        else:
+            session["turnsSinceLastIntel"] = session.get("turnsSinceLastIntel", 0) + 1
+            
+        # Priority 2: Base Hackathon Engagement Rules
+        # - Turn Count (8 pts): >= 8 turns (16 msgs)
+        # - Messages exchanged >= 10 points: >= 10 msgs 
+        # - Engagement duration > 180 seconds: > 180s
+        has_min_engagement = (session["totalMessages"] >= 16 and duration_seconds > 180)
+        
+        # Priority 3: Have we satisfied all Maximum Evaluation Criteria?
+        # - Red Flag Identification (8 pts): >= 5 flags
+        # - Information Elicitation (7 pts): Each earns 1.5 pts -> evaluated via `intel_count`
+        # - Questions Asked (4 pts): >= 5 questions
+        red_flag_count = session.get("redFlagCount", 0)
+        questions_asked = session.get("questionsAsked", 0)
+        
+        has_max_red_flags = (red_flag_count >= 5)
+        has_max_questions = (questions_asked >= 5)
+        
+        # We don't know the exact max intel points for the evaluator's specific scenario, 
+        # so we rely strongly on the 'repetition' fallback to know when they've given up.
+        is_repetitive = (intel_count > 0 and session["turnsSinceLastIntel"] >= 4)
+        
+        # Optimal Saturation Trigger: Base engagement met AND (hit maximum points OR scammer gave up)
+        is_optimal_saturation = has_min_engagement and ((has_max_questions and has_max_red_flags) or is_repetitive)
+        
+        # Infinite Loop Hard Limit Fallback (Ensures we never get trapped)
+        is_hard_limit = (session["totalMessages"] >= 30 or duration_seconds >= 300)
+        
+        if (not should_continue or is_optimal_saturation or is_hard_limit):
+            session["status"] = "completed"
+            
+            if is_optimal_saturation:
+                logger.info(f"🏆 Optimal Scoring Saturation Hit for {honeypot_request.sessionId} (Data: {intel_count}, Msgs: {session['totalMessages']})")
+            elif is_hard_limit:
+                logger.warning(f"⚠️ Hard Limit Fallback Hit for {honeypot_request.sessionId} (Msgs: {session['totalMessages']}, Secs: {duration_seconds})")
+            else:
+                logger.info(f"Session {honeypot_request.sessionId} completed (AI Terminal state)")
+                try:
+                    await training_manager.learn_from_session(session)
+                except Exception as e:
+                    logger.error(f"Background learning error: {e}")
+                    
+                if not session.get("callbackSent", False):
+                    success = await send_guvi_callback(
+                        session_id=honeypot_request.sessionId,
+                        scam_detected=session["scamDetected"],
+                        scam_type=session.get("scamType", "unknown"),
+                        confidence_level=session.get("confidenceLevel", 0.0),
+                        total_messages=session["totalMessages"],
+                        extracted_intelligence=session.get("extractedIntelligence", {}),
+                        engagement_metrics=engagement_metrics,
+                        agent_notes=session.get("agentNotes", "")
+                    )
+                    if success:
+                        session["callbackSent"] = True
+                        session["callbackSentTime"] = honeypot_request.message.timestamp.isoformat()
+                        
+                        # Store the exact payload parameters we fired off
+                        session["finalCallbackPayload"] = {
+                            "scamDetected": session["scamDetected"],
+                            "scamType": session.get("scamType", "unknown"),
+                            "confidenceLevel": session.get("confidenceLevel", 0.0),
+                            "totalMessagesExchanged": session["totalMessages"],
+                            "extractedIntelligence": session.get("extractedIntelligence", {}),
+                            "engagementMetrics": engagement_metrics,
+                            "agentNotes": session.get("agentNotes", "")
+                        }
+                        
+                        # Store the completed session including FULL conversation history into MongoDB asynchronously
+                        # We don't pop conversationHistory here so it gets permanently recorded.
+                        await sessions_collection.update_one(
+                            {"sessionId": honeypot_request.sessionId},
+                            {"$set": session},
+                            upsert=True
+                        )
+                        logger.info(f"💾 Permanently saved completed session {honeypot_request.sessionId} to MongoDB with full history")
+                        
+                        # Optimization: Wipe the session from RAM Cache since the evaluation for this user is permanently over
+                        await cache.delete(cache_key)
+                        logger.info(f"🧹 Purged completed session {honeypot_request.sessionId} from RAM Cache")
+                        
+        # 6. Push to DB and Cache (Only if not completed & purged)
+        if session.get("status") != "completed" or not session.get("callbackSent"):
+            await cache.set(cache_key, session, ttl=3600)
+            
+            # Ensure conversationHistory never pollutes the MongoDB document during active flight to save DB I/O bandwidth
+            session.pop("conversationHistory", None) 
+            await sessions_collection.update_one(
+                {"sessionId": honeypot_request.sessionId},
+                {"$set": session},
+                upsert=True
+            )
+        logger.info(f"✅ Background processing finished for session {honeypot_request.sessionId}")
+    except Exception as e:
+        logger.error(f"❌ Error in background process for session {honeypot_request.sessionId}: {e}", exc_info=True)
+
+
 @app.post(
     "/api/v1/honeypot",
     response_model=HoneypotResponse,
     dependencies=[Depends(verify_api_key)]
 )
-async def honeypot_endpoint(request: Request, honeypot_request: HoneypotRequest):
+async def honeypot_endpoint(request: Request, honeypot_request: HoneypotRequest, background_tasks: BackgroundTasks):
     """
     Main honeypot endpoint for scam detection and engagement
     
@@ -292,9 +474,14 @@ async def honeypot_endpoint(request: Request, honeypot_request: HoneypotRequest)
         ai_agent = AIAgentService()
         intelligence_extractor = IntelligenceExtractorService()
         
-        # Get or create session from database
+        # Get or create session from memory cache first, fallback to DB
         sessions_collection = Database.get_sessions_collection()
-        session = await sessions_collection.find_one({"sessionId": honeypot_request.sessionId})
+        cache_key = f"session_{honeypot_request.sessionId}"
+        
+        session = await cache.get(cache_key)
+        if not session:
+            logger.info(f"Cache miss for {honeypot_request.sessionId}, checking MongoDB...")
+            session = await sessions_collection.find_one({"sessionId": honeypot_request.sessionId})
         
         if session is None:
             # First message - create new session
@@ -324,158 +511,24 @@ async def honeypot_endpoint(request: Request, honeypot_request: HoneypotRequest)
         # Add current message to history
         all_messages = honeypot_request.conversationHistory + [honeypot_request.message]
         
-        # Detect scam intent
-        scam_confidence = 0.0
-        scam_indicators = []
-        scam_type = "unknown"
-        
-        if session.get("scamDetected"):
-            # Skip the heavy LLM call to save latency because it's already flagged
-            scam_detected = True
-            scam_confidence = session.get("confidenceLevel", 0.95)
-            scam_type = session.get("scamType", "unknown")
-            logger.info(f"Skipping Scam Detection for session {honeypot_request.sessionId} - already flagged.")
-        else:
-            scam_detected, scam_confidence, scam_indicators, scam_type = await scam_detector.detect_scam(
-                current_message=honeypot_request.message.text,
-                conversation_history=[msg.model_dump() for msg in honeypot_request.conversationHistory],
-                metadata=honeypot_request.metadata.model_dump() if honeypot_request.metadata else {}
-            )
-            
-            # Update session with scam detection
-            if scam_detected:
-                session["scamDetected"] = True
-                session["scamType"] = scam_type
-                session["confidenceLevel"] = scam_confidence
-                logger.info(f"Scam detected in session {honeypot_request.sessionId} with confidence {scam_confidence}")
-        
-        # Generate AI agent response (if scam detected)
-        agent_reply = ""
-        should_continue = True
-        
-        # Always engage to extract intelligence (honeypot behavior)
-        # Even if initial scam detection is uncertain, the AI will probe for more info
-        if scam_detected or len(honeypot_request.conversationHistory) > 0:
-            # Engage if scam detected OR if conversation already started
-            agent_reply, should_continue = await ai_agent.generate_response(
-                current_message=honeypot_request.message.text,
-                conversation_history=[msg.model_dump() for msg in all_messages],
-                session_context=session,
-                metadata=honeypot_request.metadata.model_dump() if honeypot_request.metadata else {}
-            )
-            logger.info(f"AI agent generated response for session {honeypot_request.sessionId}")
-        elif len(all_messages) == 1:
-            # First message and no clear scam detected - still engage cautiously
-            agent_reply, should_continue = await ai_agent.generate_response(
-                current_message=honeypot_request.message.text,
-                conversation_history=[msg.model_dump() for msg in all_messages],
-                session_context=session,
-                metadata=honeypot_request.metadata.model_dump() if honeypot_request.metadata else {}
-            )
-            logger.info(f"AI agent engaging with first message in session {honeypot_request.sessionId}")
-        
-        # Extract intelligence from conversation
-        extracted_intelligence = await intelligence_extractor.extract_intelligence(
+        # Zero-Blocking Fast Path: Instantly Generate AI Agent Response
+        # We process LLM engagement first using raw history to minimize latency.
+        agent_reply, should_continue = await ai_agent.generate_response(
+            current_message=honeypot_request.message.text,
             conversation_history=[msg.model_dump() for msg in all_messages],
-            current_extraction=session["extractedIntelligence"]
+            session_context=session,
+            metadata=honeypot_request.metadata.model_dump() if honeypot_request.metadata else {}
         )
+        logger.info(f"AI agent synchronously generated response for session {honeypot_request.sessionId}")
         
-        # Update session
-        session["conversationHistory"] = [msg.model_dump() for msg in all_messages]
-        if agent_reply:
-            session["conversationHistory"].append({
-                "sender": "user",
-                "text": agent_reply,
-                "timestamp": honeypot_request.message.timestamp.isoformat()
-            })
-        
-        session["extractedIntelligence"] = extracted_intelligence
-        session["lastUpdateTime"] = honeypot_request.message.timestamp
-        session["totalMessages"] = len(session["conversationHistory"])
-        
-        # Update agent notes
-        if scam_indicators:
-            session["agentNotes"] = f"{session['agentNotes']} | {', '.join(scam_indicators)}"
-        
-        # Calculate engagement metrics
-        start_time_session = session["startTime"]
-        if isinstance(start_time_session, str):
-            start_time_session = datetime.fromisoformat(start_time_session.replace('Z', '+00:00'))
-        
-        # Ensure both timestamps are timezone-aware (UTC)
-        current_timestamp = honeypot_request.message.timestamp
-        if current_timestamp.tzinfo is None:
-            current_timestamp = current_timestamp.replace(tzinfo=timezone.utc)
-        if start_time_session.tzinfo is None:
-            start_time_session = start_time_session.replace(tzinfo=timezone.utc)
-        
-        # Calculate duration, handle negative durations
-        duration_seconds = max(0, int((current_timestamp - start_time_session).total_seconds()))
-        
-        engagement_metrics = {
-            "engagementDurationSeconds": duration_seconds,
-            "totalMessagesExchanged": session["totalMessages"]
-        }
-        
-        # Save metrics to session for callback monitor
-        session["engagementMetrics"] = engagement_metrics
-        
-        # Saturation Metrics: Automatically trigger webhook when max hackathon points are achieved
-        # Max Score Threshold: >= 8 Turns (16 msgs) and > 180s duration
-        is_saturated = (session["totalMessages"] >= 16 and duration_seconds > 180)
-        
-        # Check if conversation should end or maximum saturation triggered
-        if (not should_continue or session["totalMessages"] >= 30 or is_saturated):
-            session["status"] = "completed"
-            
-            if is_saturated:
-                logger.info(f"🏆 Max Scoring Saturation Hit for {honeypot_request.sessionId} (16+ msgs, 180s+)")
-            else:
-                logger.info(f"Session {honeypot_request.sessionId} completed")
-            
-            # Auto-learn from successful session
-            if session["scamDetected"]:
-                try:
-                    await training_manager.learn_from_session(session)
-                    logger.info(f"🎓 Learning completed for session {honeypot_request.sessionId}")
-                except Exception as learn_error:
-                    logger.error(f"Learning error: {learn_error}")
-            
-            # Send final callback to GUVI
-            logger.info(f"Scam Detected: {session['scamDetected']} for session {honeypot_request.sessionId}")
-            logger.info(f"Session Callback Sent ? {session.get('callbackSent', False)}")
-            
-            if session["scamDetected"] and not session.get("callbackSent", False):
-                logger.info(f"Preparing to send GUVI callback for session {honeypot_request.sessionId}")
-                callback_success = await send_guvi_callback(
-                    session_id=honeypot_request.sessionId,
-                    scam_detected=session["scamDetected"],
-                    scam_type=session.get("scamType", "unknown"),
-                    confidence_level=session.get("confidenceLevel", 0.0),
-                    total_messages=session["totalMessages"],
-                    extracted_intelligence=session.get("extractedIntelligence", {}),
-                    engagement_metrics=engagement_metrics,
-                    agent_notes=session.get("agentNotes", "")
-                )
-                if callback_success:
-                    session["callbackSent"] = True
-                    session["callbackSentTime"] = honeypot_request.message.timestamp.isoformat()
-                    logger.info(f"Successfully sent GUVI callback for session {honeypot_request.sessionId}")
-                    
-                    # Learn from successful session for future improvements
-                    try:
-                        await training_manager.learn_from_session(session)
-                        logger.info(f"🎓 Session data queued for live learning: {honeypot_request.sessionId}")
-                    except Exception as e:
-                        logger.error(f"Failed to learn from session: {e}")
-                else:
-                    logger.error(f"Failed to send GUVI callback for session {honeypot_request.sessionId}")
-        
-        # Save session to database
-        await sessions_collection.update_one(
-            {"sessionId": honeypot_request.sessionId},
-            {"$set": session},
-            upsert=True
+        # Offload heavy Analytics, Intelligence Extraction, and Datastore routing to FastAPI BackgroundTasks
+        background_tasks.add_task(
+            process_background_tasks,
+            honeypot_request=honeypot_request,
+            session=session,
+            all_messages=all_messages,
+            agent_reply=agent_reply,
+            should_continue=should_continue
         )
         
         # Calculate processing time

@@ -1,22 +1,33 @@
-# Honeypot API Architecture
+# Honeypot Scam Detection System - Architecture
 
-## System Design
-Our Honeypot system is built around a dynamic, asynchronous event-driven architecture using **FastAPI** to ensure low-latency responses (under the strict 30s threshold).
+## High-Level Flow
+The Honeypot Scam Detection system is an AI-powered intercept layer designed to detect, engage, and extract intelligence from active scammers in real-time. 
 
-### Core Components:
-1. **API Gateway (`app/main.py`)**: Handles the core POST webhook and orchestrates the flow of data.
-2. **Intent Engine (`app/services/scam_detector.py`)**: Uses Google's efficient **Gemini 2.5 Flash-Lite** to analyze the conversational context and assign a `confidenceLevel` string and `scamType` categorization within sub-seconds.
-3. **Persona Engine (`app/services/ai_agent.py`)**: Once an interaction flags high confidence for malicious intent, this engine assumes one of several dynamic personas (e.g., Tech-Illiterate Senior, Busy Professional) designed to perfectly counter the `scamType` identified.
-4. **Intelligence Extractor (`app/services/intelligence_extractor.py`)**: A parallel processing service that uses Regex and NLP heuristics to comb through the scammer's messages and extract Entity data (Bank Accounts, Phone Numbers, UPI IDs, Order Numbers).
-5. **Callback Monitor (`app/services/callback_monitor.py`)**: Runs asynchronously in the background. It measures Engagement Durations and Turn Counts. Once a threshold is met or the conversation terminates, it fires the `finalOutput` payload.
+### Data Flow Pipeline
+1. **Ingestion**: The system receives a message from an external client (e.g., SMS, WhatsApp, Web) via the `POST /api/message` endpoint.
+2. **Context Resolution**: The request is routed to the `HoneypotRouter`. It checks the `sessionId` against the local MongoDB instance to restore the entire conversational memory and extraction state.
+3. **Scam Detection (Initial Pass)**: If the session is new, the message is sent to `ScamDetectorService` to evaluate if the message exhibits fraudulent intent.
+    - Uses Gemini-2.5-Flash-Lite (default) for high-speed pattern recognition.
+    - Evaluates against localized languages (Hinglish, Gujarati, Tamil, etc.).
+4. **Active Engagement**: The `AIAgentService` impersonates a vulnerable target to respond to the scammer.
+    - Rotates between `gemini-2.5-flash-lite`, `gemini-3-flash`, and `gemini-3-pro` dynamically based on conversation depth and API Rate Limit (`429`) cooldowns.
+    - Built-in prompt engineering forces the AI to extract specific details over an extended 16+ message span without repeating itself.
+5. **Intelligence Extraction**: The `IntelligenceExtractorService` uses targeted Regex heuristics to passively strip high-value IOCs (Indicators of Compromise) like `UPI IDs`, `Bank Accounts`, `URLs`, and `Phone Numbers` from the scammer's raw inputs.
+6. **Telemetry Callback**: Once the conversation hits the max Hackathon Scoring criteria (16+ expected messages, >180s duration) OR the AI determines it cannot extract any further intelligence, the loop is terminated. A comprehensive `GuviCallbackPayload` is generated and asynchronously POSTed to the external evaluator webhook.
 
-## State Management
-We utilize **MongoDB** via `Motor` for non-blocking asynchronous database transactions. This allows the system to instantaneously track and recall:
-- The full `conversationHistory` array for context windowing.
-- Rolling aggregation of `engagementMetrics` to ensure we hit maximum points for long durations.
-- The evolving state of `extractedIntelligence` so the AI knows what data points it still needs to elicit.
+## Microservices Breakdown
 
-## Optimization Strategies
-- **Dynamic Model Degradation**: We leverage `gemini-2.5-flash-lite` for the fastest Turn 1-3 detections to guarantee < 15s responses, avoiding the 30s timeout failure penalty.
-- **Rule-Based Prioritization**: Known scam indicators ("OTP", "cvv") map directly to a high `confidenceLevel` via heuristic dictionaries before the LLM is even invoked, saving crucial bandwidth and reducing processing time to < 0.1s. 
-- **Prompt Engineering for Maximum Scoring**: The core System Prompts explicitly instruct the LLM to target the exact metrics evaluated in the Hackathon: (1) Ask 5+ questions, (2) Keep engagement > 8 turns, (3) Extract 5+ specific Red Flags.
+### 1. `app/services/scam_detector.py`
+Optimized for the lowest-latency decision making. It uses a strictly deterministic temperature (`0.0`) to guarantee that its JSON output parses correctly every time. It uses memory-based models cooldown caching for automatic 429 backoff logic.
+
+### 2. `app/services/ai_agent.py`
+The core conversational engine. Built with advanced Memory Context scaling:
+- **Truncation Prevention**: Scales its token generation limit dynamically based on turn depth (1000 -> 2000 -> 4000 tokens).
+- **Memory Preservation**: Preserves up to 30 messages of conversational history to stop fallback repetitions.
+- **RPM Hardening**: Features a 60-second lockout dictionary for models that trip Google's API limits, safely bypassing throttling.
+
+### 3. `app/services/intelligence_extractor.py`
+A robust Regex parsing engine designed to extract 9 specific categories of indicators natively, mapping formats like IBAN accounts, US Phone formatting, specific `@paytm` UPI signatures, and case ticket IDs without relying on LLM hallucination.
+
+### 4. `app/utils/callback.py`
+Listens for the completion of the chat limits (`session["totalMessages"] >= 16 and duration_seconds > 180`), and formats the extracted data dynamically into the 100-point metric payload string. It reliably HTTP POSTs the data to the configured GUVI backend endpoint.

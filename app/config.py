@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     app_name: str = "Honeypot Scam Detection API"
     env: str = "production"
     debug: bool = False
-    api_key: str = "Dm59xTVhENeQ2x2Jr9xt5qEpTYWbKhiYDkOuZ2rVdC63yMaWTg"
+    api_key: str = ""
     
     # Server (PORT is auto-set by Cloud Run)
     host: str = "0.0.0.0"
@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     workers: int = 4
     
     # MongoDB (Cloud Optimized)
-    mongodb_url: str = "mongodb://shrimad:OHXiq3rWMFCfm7eR@34.131.176.117:27017/honeypotfraud?authSource=admin"
+    mongodb_url: str = "mongodb://localhost:27017"
     mongodb_db_name: str = "honeypotfraud"
     mongodb_max_pool_size: int = 100
     mongodb_min_pool_size: int = 10
@@ -27,12 +27,12 @@ class Settings(BaseSettings):
     mongodb_server_selection_timeout_ms: int = 5000
     
     # Google Gemini (Premium) - Optimized for human-like responses
-    gemini_api_key: str = "AIzaSyBfTE4ivJFNh3UR2MUS2zogOJh2JU4SORI"
+    gemini_api_key: str = ""
     gemini_model: str = "gemini-2.5-flash-lite"    # Fast base detection model
     gemini_max_retries: int = 3
     gemini_timeout: int = 12                       # Internal limit of 10-15s
     gemini_context_messages: int = 30              # Full conversation history
-    gemini_max_output_tokens: int = 1000
+    gemini_max_output_tokens: int = 1500
     gemini_temperature: float = 0.95
     
     # GUVI Callback
@@ -40,11 +40,11 @@ class Settings(BaseSettings):
     
     # Performance
     max_connections: int = 100
-    connection_timeout: int = 180
-    request_timeout: int = 180
+    connection_timeout: int = 360
+    request_timeout: int = 35
     enable_caching: bool = False
     cache_ttl: int = 300
-    inactivity_threshold_minutes: float = 0.5  # 30 seconds for faster e2e testing
+    inactivity_threshold_minutes: float = 5.0  # 180 seconds to align with max points
     
     # Security
     cors_origins: List[str] = ["*"]

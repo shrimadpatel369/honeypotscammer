@@ -25,8 +25,8 @@ class AIAgentService:
         # Ordered by preference: Latest Gemini 3 > Gemini 2.5 > Gemini 2.0 > Gemini 1.5
         self.supported_models = [
             # Gemini 3 (Latest - Preview models)
-            "gemini-3-pro-preview",          # Most intelligent multimodal model, 1M token context
-            "gemini-3-flash-preview",        # Fast Gemini 3, balanced performance
+            "gemini-3-pro",          # Most intelligent multimodal model, 1M token context
+            "gemini-3-flash",        # Fast Gemini 3, balanced performance
             
             # Gemini 2.5 (Production - Best for complex reasoning)
             "gemini-2.5-pro",                # Complex reasoning and coding, 1M token context
@@ -44,15 +44,15 @@ class AIAgentService:
             "gemini-pro",                    # Legacy fallback (last resort)
         ]
         
-        # Use configured model as the fallback/pro model
-        self.pro_model = settings.gemini_model
-        self.flash_model = "gemini-2.5-flash"
-        self.lite_model = "gemini-2.5-flash-lite"
+        # Activate Gemini 3 as the core reasoning engine tiers
+        self.pro_model = "gemini-3-pro"
+        self.flash_model = "gemini-3-flash"
+        self.lite_model = settings.gemini_model if "lite" in settings.gemini_model else "gemini-2.5-flash-lite"
         
-        # Validate configured model
-        if self.pro_model in ["gemini-pro-old", "gemini-1.0-pro"]:
-            logger.warning(f"⚠️ Configured model '{self.pro_model}' is deprecated. Using gemini-2.5-pro instead.")
-            self.pro_model = "gemini-2.5-pro"
+        # Validate legacy configured models being passed via env
+        if settings.gemini_model in ["gemini-pro-old", "gemini-1.0-pro"]:
+            logger.warning(f"⚠️ Configured model '{settings.gemini_model}' is deprecated. Using gemini-3-pro instead.")
+            self.pro_model = "gemini-3-pro"
         
         logger.info(f"✅ Initializing Dynamic Model Strategy: {self.lite_model} -> {self.flash_model} -> {self.pro_model}")
         
@@ -864,7 +864,7 @@ CRITICAL LANGUAGE REQUIREMENT:
                 "2. QUESTIONS: You MUST ask at least 5 distinct questions throughout the conversation. EVERY single reply you send MUST end with a question.\n"
                 "3. INVESTIGATIVE QUESTIONS: Ask specifically about their identity, their company, their physical address, or their official website (e.g. \"What is your employee ID?\", \"Where is your office located?\").\n"
                 "4. RED FLAG CALLOUTS: Explicitly call out at least 5 'Red Flags' naturally. (e.g. \"Why is this so URGENT?\", \"Why do you need my OTP? Banks never ask for that\").\n"
-                "5. INFORMATION ELICITATION: Force them to provide personal details (phone number, name, employee ID, exact steps to follow).\n"
+                "5. INFORMATION ELICITATION (CRITICAL): You MUST extract as many of these 8 exact data types as possible: Phone Numbers, Bank Accounts, UPI IDs, Phishing Links, Email Addresses, Case IDs, Policy Numbers, Order Numbers. Ask for them explicitly! (e.g. \"What is the case ID?\", \"What is your UPI?\", \"Which email should I send this to?\")\n"
                 "6. NEVER REPEAT YOURSELF: Always ask a entirely NEW question that builds upon exactly what the scammer just said in their prior message.\n\n"
             )
 

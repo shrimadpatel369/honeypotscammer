@@ -135,7 +135,7 @@ class SessionDocument(BaseModel):
     """MongoDB session document"""
     sessionId: str
     scamDetected: bool
-    conversationHistory: List[Dict[str, Any]]
+    conversationHistory: Optional[List[Dict[str, Any]]] = Field(default_factory=list)
     extractedIntelligence: Dict[str, Any]
     metadata: Dict[str, Any]
     startTime: datetime

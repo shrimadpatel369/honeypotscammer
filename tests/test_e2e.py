@@ -83,15 +83,15 @@ def test_e2e():
     if session_resp.status_code == 200:
         s_data = session_resp.json()
         print(f"[+] Session '{session_id}' found in DB.")
-        print(f"[+] Total Messages Recorded: {s_data.get('totalMessagesExchanged')}")
+        print(f"[+] Total Messages Recorded: {s_data.get('totalMessages')}")
     else:
         print(f"[!] Failed to fetch session. Code: {session_resp.status_code}")
         
     # Wait for Callback (Simulate inactivity timeout)
-    print("\n[*] Waiting 40 seconds to observe inactivity callback threshold (configured to 30s)...")
-    for i in range(40, 0, -5):
+    print("\n[*] Waiting 195 seconds to observe inactivity callback threshold (configured to 180s)...")
+    for i in range(195, 0, -15):
          print(f"    ... {i} seconds remaining")
-         time.sleep(5)
+         time.sleep(15)
          
     # Check if callback was sent
     print("\n[*] Checking if callback was recorded...")

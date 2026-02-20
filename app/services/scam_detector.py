@@ -21,10 +21,11 @@ class ScamDetectorService:
     def __init__(self):
         self.supported_models = [
             settings.gemini_model,           # Primary (e.g., gemini-2.5-flash-lite)
-            "gemini-2.5-flash",              # Fallback 1
-            "gemini-1.5-flash",              # Fallback 2
-            "gemini-2.5-pro",                # Fallback 3
-            "gemini-1.5-pro",                # Fallback 4
+            "gemini-3-flash",                # Next-Gen Fallback 1
+            "gemini-2.5-flash",              # Stable Fallback 2
+            "gemini-1.5-flash",              # Stable Fallback 3
+            "gemini-3-pro",                  # Advanced Fallback 4
+            "gemini-2.5-pro",                # Advanced Fallback 5
         ]
         
         self.generation_config = {
