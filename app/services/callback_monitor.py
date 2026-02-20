@@ -118,6 +118,8 @@ class CallbackMonitor:
                     callback_success = await send_guvi_callback(
                         session_id=session_id,
                         scam_detected=session.get("scamDetected", False),
+                        scam_type=session.get("scamType", "unknown"),
+                        confidence_level=session.get("confidenceLevel", 0.0),
                         total_messages=session.get("totalMessages", 0),
                         extracted_intelligence=session.get("extractedIntelligence", {}),
                         engagement_metrics=engagement_metrics,

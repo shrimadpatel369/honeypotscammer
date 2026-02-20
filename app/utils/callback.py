@@ -11,6 +11,8 @@ logger = logging.getLogger(__name__)
 async def send_guvi_callback(
     session_id: str,
     scam_detected: bool,
+    scam_type: str,
+    confidence_level: float,
     total_messages: int,
     extracted_intelligence: Dict[str, Any],
     engagement_metrics: Dict[str, int],
@@ -27,6 +29,8 @@ async def send_guvi_callback(
     Args:
         session_id: Unique session identifier
         scam_detected: Whether scam was detected
+        scam_type: Predicted scam type
+        confidence_level: Model confidence level
         total_messages: Total number of messages exchanged
         extracted_intelligence: All extracted intelligence
         engagement_metrics: Metrics about engagement duration and quantity
@@ -55,7 +59,10 @@ async def send_guvi_callback(
         payload = {
             "sessionId": session_id,
             "scamDetected": scam_detected,
+            "scamType": scam_type,
+            "confidenceLevel": confidence_level,
             "totalMessagesExchanged": total_messages,
+            "engagementDurationSeconds": engagement_metrics.get("engagementDurationSeconds", 0),
             "engagementMetrics": engagement_metrics,
             "extractedIntelligence": {
                 "bankAccounts": extracted_intelligence.get("bankAccounts", []),
@@ -63,7 +70,10 @@ async def send_guvi_callback(
                 "phishingLinks": extracted_intelligence.get("phishingLinks", []),
                 "phoneNumbers": extracted_intelligence.get("phoneNumbers", []),
                 "emailAddresses": extracted_intelligence.get("emailAddresses", []),
-                "suspiciousKeywords": extracted_intelligence.get("suspiciousKeywords", [])
+                "suspiciousKeywords": extracted_intelligence.get("suspiciousKeywords", []),
+                "caseIds": extracted_intelligence.get("caseIds", []),
+                "policyNumbers": extracted_intelligence.get("policyNumbers", []),
+                "orderNumbers": extracted_intelligence.get("orderNumbers", [])
             },
             "agentNotes": agent_notes
         }

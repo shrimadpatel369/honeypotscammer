@@ -39,6 +39,15 @@ class IntelligenceExtractorService:
             "suspicious_keywords": [
                 r'\b(?:urgent|immediately|expire|suspend|block|verify|confirm|activate|update|secure|alert|warning|limited time|act now|last chance)\b',
             ],
+            "case_id": [
+                r'(?i)\b(?:case|ref|reference|ticket)\s*(?:no\.?|number|id)?\s*[:#-]?\s*([A-Z0-9]{4,20})\b',
+            ],
+            "policy_number": [
+                r'(?i)\b(?:policy|insurance)\s*(?:no\.?|number|id)?\s*[:#-]?\s*([A-Z0-9]{4,20})\b',
+            ],
+            "order_number": [
+                r'(?i)\b(?:order|invoice|tracking)\s*(?:no\.?|number|id)?\s*[:#-]?\s*([A-Z0-9]{4,20})\b',
+            ],
         }
     
     async def extract_intelligence(
@@ -57,7 +66,6 @@ class IntelligenceExtractorService:
             Updated intelligence dictionary
         """
         try:
-            # Initialize with current extraction
             intelligence = {
                 "bankAccounts": list(set(current_extraction.get("bankAccounts", []))),
                 "upiIds": list(set(current_extraction.get("upiIds", []))),
@@ -65,6 +73,9 @@ class IntelligenceExtractorService:
                 "phoneNumbers": list(set(current_extraction.get("phoneNumbers", []))),
                 "emailAddresses": list(set(current_extraction.get("emailAddresses", []))),
                 "suspiciousKeywords": list(set(current_extraction.get("suspiciousKeywords", []))),
+                "caseIds": list(set(current_extraction.get("caseIds", []))),
+                "policyNumbers": list(set(current_extraction.get("policyNumbers", []))),
+                "orderNumbers": list(set(current_extraction.get("orderNumbers", []))),
             }
             
             # Extract from all messages (focus on scammer messages)
@@ -126,6 +137,27 @@ class IntelligenceExtractorService:
                     for pattern in self.patterns["suspicious_keywords"]:
                         matches = re.findall(pattern, text, re.IGNORECASE)
                         intelligence["suspiciousKeywords"].extend(matches)
+                        
+                    # Extract Case IDs
+                    for pattern in self.patterns["case_id"]:
+                        matches = re.findall(pattern, text)
+                        for match in matches:
+                            if len(re.sub(r'\D', '', match)) > 0 or len(re.sub(r'[^A-Z]', '', match)) > 0: # Ensure it has letters/numbers 
+                                intelligence["caseIds"].append(match.upper())
+
+                    # Extract Policy Numbers
+                    for pattern in self.patterns["policy_number"]:
+                        matches = re.findall(pattern, text)
+                        for match in matches:
+                            if len(re.sub(r'\D', '', match)) > 0 or len(re.sub(r'[^A-Z]', '', match)) > 0:
+                                intelligence["policyNumbers"].append(match.upper())
+
+                    # Extract Order Numbers
+                    for pattern in self.patterns["order_number"]:
+                        matches = re.findall(pattern, text)
+                        for match in matches:
+                            if len(re.sub(r'\D', '', match)) > 0 or len(re.sub(r'[^A-Z]', '', match)) > 0:
+                                intelligence["orderNumbers"].append(match.upper())
             
             # Remove duplicates and empty values
             for key in intelligence:

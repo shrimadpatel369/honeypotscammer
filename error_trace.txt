@@ -1,0 +1,29 @@
+Traceback (most recent call last):
+  File "C:\Users\smrut\Desktop\honeypotscammer\run_test.py", line 3, in <module>
+    import app.main
+  File "C:\Users\smrut\Desktop\honeypotscammer\app\__init__.py", line 2, in <module>
+    from app.config import settings
+  File "C:\Users\smrut\Desktop\honeypotscammer\app\config.py", line 59, in <module>
+    settings = Settings()
+  File "C:\Users\smrut\Desktop\honeypotscammer\.venv\Lib\site-packages\pydantic_settings\main.py", line 152, in __init__
+    super().__init__(
+    ~~~~~~~~~~~~~~~~^
+        **__pydantic_self__._settings_build_values(
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    ...<22 lines>...
+        )
+        ^
+    )
+    ^
+  File "C:\Users\smrut\Desktop\honeypotscammer\.venv\Lib\site-packages\pydantic\main.py", line 211, in __init__
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+pydantic_core._pydantic_core.ValidationError: 3 validation errors for Settings
+mongodb_url
+  Field required [type=missing, input_value={'api_key': 'Dm59xTVhENeQ...44.asia-south2.run.app'}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.9/v/missing
+gemini_api_key
+  Field required [type=missing, input_value={'api_key': 'Dm59xTVhENeQ...44.asia-south2.run.app'}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.9/v/missing
+api_url
+  Extra inputs are not permitted [type=extra_forbidden, input_value='https://honeypotscammer-...844.asia-south2.run.app', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.9/v/extra_forbidden

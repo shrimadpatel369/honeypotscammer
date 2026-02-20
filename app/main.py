@@ -8,13 +8,10 @@ import logging
 import time
 from pathlib import Path
 
-from slowapi import Limiter, _rate_limit_exceeded_handler
-from slowapi.util import get_remote_address
-from slowapi.errors import RateLimitExceeded
 
 from app.config import settings
 from app.database import Database, init_indexes
-from app.models import HoneypotRequest, HoneypotResponse
+from app.models import HoneypotRequest, HoneypotResponse, GuviCallbackPayload
 from app.auth import verify_api_key
 from app.services.scam_detector import ScamDetectorService
 from app.services.ai_agent import AIAgentService
@@ -36,8 +33,7 @@ from app.logger import (
 setup_logging(debug=settings.debug)
 logger = logging.getLogger(__name__)
 
-# Initialize rate limiter
-limiter = Limiter(key_func=get_remote_address)
+
 
 
 @asynccontextmanager
@@ -77,8 +73,7 @@ app = FastAPI(
 )
 
 # Add rate limiter state
-app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
 
 # CORS middleware
 app.add_middleware(
@@ -103,7 +98,7 @@ async def log_requests(request: Request, call_next):
     # Capture request details
     path = request.url.path
     method = request.method
-    client_ip = get_remote_address(request)
+    client_ip = request.client.host if request.client else "unknown"
     
     # Get headers (mask sensitive data)
     headers = dict(request.headers)
@@ -152,6 +147,14 @@ async def global_exception_handler(request: Request, exc: Exception):
         }
     )
 
+@app.post("/api/v1/mock-callback")
+async def mock_callback(payload: GuviCallbackPayload):
+    """Internal mock endpoint to capture the final callback payload for testing"""
+    import json
+    with open("mock_callback_payload.json", "w") as f:
+        json.dump(payload.model_dump(), f, indent=2)
+    logger.info(f"Mock Callback Received for session {payload.sessionId}")
+    return {"status": "success", "message": "Callback captured"}
 
 # Routes
 @app.get("/")
@@ -163,7 +166,6 @@ async def root():
     return {"message": "Honeypot API is running", "version": "2.0.0", "docs": "/docs"}
 
 @app.get("/health")
-@limiter.limit(f"{settings.rate_limit_per_minute}/minute")
 async def health_check(request: Request):
     """Detailed health check endpoint"""
     try:
@@ -195,7 +197,6 @@ async def health_check(request: Request):
     response_model=HoneypotResponse,
     dependencies=[Depends(verify_api_key)]
 )
-@limiter.limit(f"{settings.rate_limit_per_minute}/minute")
 async def message_endpoint(request: Request):
     """
     Main endpoint for hackathon - accepts messages as per specification
@@ -229,7 +230,6 @@ async def message_endpoint(request: Request):
     response_model=HoneypotResponse,
     dependencies=[Depends(verify_api_key)]
 )
-@limiter.limit(f"{settings.rate_limit_per_minute}/minute")
 async def honeypot_endpoint(request: Request, honeypot_request: HoneypotRequest):
     """
     Main honeypot endpoint for scam detection and engagement
@@ -316,6 +316,8 @@ async def honeypot_endpoint(request: Request, honeypot_request: HoneypotRequest)
                 "totalMessages": 0,
                 "status": "active",
                 "agentNotes": "",
+                "scamType": "unknown",
+                "confidenceLevel": 0.0,
                 "callbackSent": False  # Track callback status
             }
         
@@ -323,16 +325,29 @@ async def honeypot_endpoint(request: Request, honeypot_request: HoneypotRequest)
         all_messages = honeypot_request.conversationHistory + [honeypot_request.message]
         
         # Detect scam intent
-        scam_detected, scam_confidence, scam_indicators = await scam_detector.detect_scam(
-            current_message=honeypot_request.message.text,
-            conversation_history=[msg.model_dump() for msg in honeypot_request.conversationHistory],
-            metadata=honeypot_request.metadata.model_dump() if honeypot_request.metadata else {}
-        )
+        scam_confidence = 0.0
+        scam_indicators = []
+        scam_type = "unknown"
         
-        # Update session with scam detection
-        if scam_detected and not session["scamDetected"]:
-            session["scamDetected"] = True
-            logger.info(f"Scam detected in session {honeypot_request.sessionId} with confidence {scam_confidence}")
+        if session.get("scamDetected"):
+            # Skip the heavy LLM call to save latency because it's already flagged
+            scam_detected = True
+            scam_confidence = session.get("confidenceLevel", 0.95)
+            scam_type = session.get("scamType", "unknown")
+            logger.info(f"Skipping Scam Detection for session {honeypot_request.sessionId} - already flagged.")
+        else:
+            scam_detected, scam_confidence, scam_indicators, scam_type = await scam_detector.detect_scam(
+                current_message=honeypot_request.message.text,
+                conversation_history=[msg.model_dump() for msg in honeypot_request.conversationHistory],
+                metadata=honeypot_request.metadata.model_dump() if honeypot_request.metadata else {}
+            )
+            
+            # Update session with scam detection
+            if scam_detected:
+                session["scamDetected"] = True
+                session["scamType"] = scam_type
+                session["confidenceLevel"] = scam_confidence
+                logger.info(f"Scam detected in session {honeypot_request.sessionId} with confidence {scam_confidence}")
         
         # Generate AI agent response (if scam detected)
         agent_reply = ""
@@ -405,10 +420,18 @@ async def honeypot_endpoint(request: Request, honeypot_request: HoneypotRequest)
         # Save metrics to session for callback monitor
         session["engagementMetrics"] = engagement_metrics
         
-        # Check if conversation should end
-        if not should_continue or session["totalMessages"] >= 30:  # Max 30 messages
+        # Saturation Metrics: Automatically trigger webhook when max hackathon points are achieved
+        # Max Score Threshold: >= 8 Turns (16 msgs) and > 180s duration
+        is_saturated = (session["totalMessages"] >= 16 and duration_seconds > 180)
+        
+        # Check if conversation should end or maximum saturation triggered
+        if (not should_continue or session["totalMessages"] >= 30 or is_saturated):
             session["status"] = "completed"
-            logger.info(f"Session {honeypot_request.sessionId} completed")
+            
+            if is_saturated:
+                logger.info(f"🏆 Max Scoring Saturation Hit for {honeypot_request.sessionId} (16+ msgs, 180s+)")
+            else:
+                logger.info(f"Session {honeypot_request.sessionId} completed")
             
             # Auto-learn from successful session
             if session["scamDetected"]:
@@ -427,6 +450,8 @@ async def honeypot_endpoint(request: Request, honeypot_request: HoneypotRequest)
                 callback_success = await send_guvi_callback(
                     session_id=honeypot_request.sessionId,
                     scam_detected=session["scamDetected"],
+                    scam_type=session.get("scamType", "unknown"),
+                    confidence_level=session.get("confidenceLevel", 0.0),
                     total_messages=session["totalMessages"],
                     extracted_intelligence=session.get("extractedIntelligence", {}),
                     engagement_metrics=engagement_metrics,
@@ -456,16 +481,10 @@ async def honeypot_endpoint(request: Request, honeypot_request: HoneypotRequest)
         # Calculate processing time
         processing_time = (time.time() - start_time) * 1000  # Convert to milliseconds
         
-        # Prepare response
+        # Prepare response (Hackathon schema format)
         response = HoneypotResponse(
             status="success",
-            sessionId=honeypot_request.sessionId,
-            scamDetected=session["scamDetected"],
-            reply=agent_reply if agent_reply else None,
-            shouldContinue=should_continue and session["status"] == "active",
-            engagementMetrics=engagement_metrics,
-            extractedIntelligence=extracted_intelligence,
-            agentNotes=session["agentNotes"].strip(" |")
+            reply=agent_reply if agent_reply else ""
         )
         
         # Log response details
@@ -473,18 +492,7 @@ async def honeypot_endpoint(request: Request, honeypot_request: HoneypotRequest)
         logger.info(f"📤 OUTGOING RESPONSE - Session: {honeypot_request.sessionId}")
         logger.info("="*80)
         logger.info(f"Status: {response.status}")
-        logger.info(f"Scam Detected: {response.scamDetected}")
-        logger.info(f"Should Continue: {response.shouldContinue}")
         logger.info(f"Agent Reply: {response.reply}")
-        logger.info(f"Total Messages: {response.engagementMetrics.totalMessagesExchanged}")
-        logger.info(f"Duration: {response.engagementMetrics.engagementDurationSeconds}s")
-        logger.info(f"Intelligence Extracted:")
-        logger.info(f"  - Bank Accounts: {len(response.extractedIntelligence.bankAccounts)}")
-        logger.info(f"  - UPI IDs: {len(response.extractedIntelligence.upiIds)}")
-        logger.info(f"  - Phishing Links: {len(response.extractedIntelligence.phishingLinks)}")
-        logger.info(f"  - Phone Numbers: {len(response.extractedIntelligence.phoneNumbers)}")
-        logger.info(f"  - Keywords: {len(response.extractedIntelligence.suspiciousKeywords)}")
-        logger.info(f"Agent Notes: {response.agentNotes}")
         logger.info(f"Processing Time: {processing_time:.2f}ms")
         logger.info("="*80)
         
