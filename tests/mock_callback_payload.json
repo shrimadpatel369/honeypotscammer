@@ -1,0 +1,30 @@
+{
+  "sessionId": "fdb5f74d-3914-435e-bef9-f75338ababdd",
+  "scamDetected": false,
+  "scamType": "unknown",
+  "confidenceLevel": 0.0,
+  "totalMessagesExchanged": 2,
+  "engagementDurationSeconds": 0,
+  "engagementMetrics": {
+    "engagementDurationSeconds": 0,
+    "totalMessagesExchanged": 2
+  },
+  "extractedIntelligence": {
+    "bankAccounts": [
+      "9876543210"
+    ],
+    "upiIds": [],
+    "phishingLinks": [],
+    "phoneNumbers": [
+      "9876543210"
+    ],
+    "emailAddresses": [],
+    "suspiciousKeywords": [
+      "immediately"
+    ],
+    "caseIds": [],
+    "policyNumbers": [],
+    "orderNumbers": []
+  },
+  "agentNotes": ""
+}

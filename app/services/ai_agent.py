@@ -1043,13 +1043,22 @@ MAKE YOUR RESPONSE NATURAL, HUMAN-LIKE, AND STRATEGICALLY DESIGNED TO EXTRACT MA
             
             # Filter models to try based on cooldown
             now = datetime.now()
-            base_models = [self.current_model] + [m for m in self.supported_models if m != self.current_model]
+            
+            # Dynamically select starting model based on conversation length
+            turn_count = context_analysis.get("message_count", 0)
+            target_model = self.lite_model
+            if turn_count > 6:
+                target_model = self.pro_model
+            elif turn_count > 3:
+                target_model = self.flash_model
+                
+            base_models = [target_model] + [m for m in self.supported_models if m != target_model]
             
             models_to_try = [m for m in base_models if m not in AIAgentService._model_cooldowns or now > AIAgentService._model_cooldowns[m]]
             
             if not models_to_try:
-                logger.warning("⚠️ All agent models on cooldown! Forced to use current model.")
-                models_to_try = [self.current_model]
+                logger.warning("⚠️ All agent models on cooldown! Forced to use target model.")
+                models_to_try = [target_model]
             
             for attempt, model_name in enumerate(models_to_try, 1):
                 try:
@@ -1082,10 +1091,9 @@ MAKE YOUR RESPONSE NATURAL, HUMAN-LIKE, AND STRATEGICALLY DESIGNED TO EXTRACT MA
                         request_options={'timeout': settings.gemini_timeout}
                     )
                     
-                    # Success! Update current model if we had to fallback
+                    # Success! Log if we had to fallback
                     if attempt > 1:
                         logger.info(f"✅ Switched to fallback model: {model_name} (attempt {attempt})")
-                        self.current_model = model_name
                     
                     break  # Success, exit retry loop
                     

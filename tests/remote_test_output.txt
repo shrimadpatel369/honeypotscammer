@@ -1,0 +1,43 @@
+============================================================
+ Honeypot API E2E Testing Script (REMOTE DEPLOYMENT)
+============================================================
+
+[*] Starting remote session: f6bbbb19-805c-49f0-a551-1ec3b16152d6
+
+[*] Sending Message 1 to Remote URL...
+[+] Response received in 0.67s
+[+] Scam Detected: None
+[AI Reply] -> I'm not sure about clicking links. Can you explain what this is for?
+[+] Extracted Intel: None
+[!] Warning: Scam was not detected. The test might not proceed correctly.
+
+[*] Sending Message 2 (Continuing the scam)...
+[+] Response received in 0.76s
+[AI Reply] -> None
+[+] Extracted Intel: None
+
+[*] Validating remote session data is stored...
+[+] Session 'f6bbbb19-805c-49f0-a551-1ec3b16152d6' found in Remote DB.
+[+] Total Messages Recorded: 2
+
+[*] Waiting 195 seconds to observe inactivity callback threshold on Cloud Run (configured to 180s)...
+    ... 195 seconds remaining
+    ... 180 seconds remaining
+    ... 165 seconds remaining
+    ... 150 seconds remaining
+    ... 135 seconds remaining
+    ... 120 seconds remaining
+    ... 105 seconds remaining
+    ... 90 seconds remaining
+    ... 75 seconds remaining
+    ... 60 seconds remaining
+    ... 45 seconds remaining
+    ... 30 seconds remaining
+    ... 15 seconds remaining
+
+[*] Checking if callback was recorded on Remote backend...
+[!] Callback endpoint returned 200 but no callbacks were found for this session.
+
+============================================================
+ Test Complete
+============================================================

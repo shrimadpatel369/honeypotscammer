@@ -16,7 +16,8 @@ async def send_guvi_callback(
     total_messages: int,
     extracted_intelligence: Dict[str, Any],
     engagement_metrics: Dict[str, int],
-    agent_notes: str
+    agent_notes: str,
+    testing_mode: bool = False
 ) -> bool:
     """
     Send final result callback to GUVI evaluation endpoint
@@ -41,18 +42,18 @@ async def send_guvi_callback(
     """
     try:
         # Log function invocation
-        logger.info(f"🔔 GUVI callback function triggered for session: {session_id}")
-        logger.debug(f"Callback params - scam_detected: {scam_detected}, metrics: {engagement_metrics}")
+        logger.info(f"[HONEYPOT-APP] 🔔 GUVI callback function triggered for session: {session_id}")
+        logger.debug(f"[HONEYPOT-APP] Callback params - scam_detected: {scam_detected}, testing_mode: {testing_mode}")
         
         # ✅ ONLY send callback if scam is confirmed
-        if not scam_detected:
-            logger.info(f"⏭️ Skipping GUVI callback for session {session_id} - No scam detected")
+        if not scam_detected and not testing_mode:
+            logger.info(f"[HONEYPOT-APP] ⏭️ Skipping GUVI callback for session {session_id} - No scam detected")
             return True  # Return True since this is expected behavior
         
         # Validate sufficient engagement
-        if total_messages < 3:
+        if total_messages < 3 and not testing_mode:
             logger.warning(
-                f"⚠️ Session {session_id} has insufficient messages ({total_messages}), "
+                f"[HONEYPOT-APP] ⚠️ Session {session_id} has insufficient messages ({total_messages}), "
                 "but sending callback anyway since scam was detected"
             )
         
@@ -78,34 +79,37 @@ async def send_guvi_callback(
             "agentNotes": agent_notes
         }
         
-        logger.info("="*80)
-        logger.info(f"📡 SENDING GUVI CALLBACK - Session: {session_id}")
-        logger.info("="*80)
-        logger.info(f"✅ Scam Confirmed - Sufficient Engagement Complete")
-        logger.info(f"Endpoint: {settings.guvi_callback_url}")
-        logger.info(f"Session ID: {session_id}")
-        logger.info(f"Scam Detected: {scam_detected}")
-        logger.info(f"Total Messages: {total_messages}")
-        logger.info(f"Intelligence Summary:")
-        logger.info(f"  - Bank Accounts: {len(payload['extractedIntelligence']['bankAccounts'])}")
-        logger.info(f"  - UPI IDs: {len(payload['extractedIntelligence']['upiIds'])}")
-        logger.info(f"  - Phishing Links: {len(payload['extractedIntelligence']['phishingLinks'])}")
-        logger.info(f"  - Phone Numbers: {len(payload['extractedIntelligence']['phoneNumbers'])}")
-        logger.info(f"  - Keywords: {len(payload['extractedIntelligence']['suspiciousKeywords'])}")
-        logger.info(f"Agent Notes: {agent_notes}")
-        logger.info("Full Payload:")
+        logger.info("[HONEYPOT-APP] " + "="*80)
+        logger.info(f"[HONEYPOT-APP] 📡 SENDING GUVI CALLBACK - Session: {session_id}")
+        logger.info("[HONEYPOT-APP] " + "="*80)
+        
+        target_url = settings.guvi_callback_url
+        if testing_mode:
+            # Re-route to our own backend test endpoint to prove execution without polluting evaluator db
+            target_url = "http://localhost:8000/api/v1/mock-callback"
+            if settings.env == "production":
+                target_url = "https://honeypotscammer-136046240844.asia-south2.run.app/api/v1/mock-callback"
+        
+        logger.info(f"[HONEYPOT-APP] ✅ Scam Confirmed - Sufficient Engagement Complete")
+        logger.info(f"[HONEYPOT-APP] Endpoint: {target_url} (Testing Mode: {testing_mode})")
+        logger.info(f"[HONEYPOT-APP] Session ID: {session_id}")
+        logger.info(f"[HONEYPOT-APP] Scam Detected: {scam_detected}")
+        logger.info(f"[HONEYPOT-APP] Total Messages: {total_messages}")
+        logger.info(f"[HONEYPOT-APP] Intelligence Summary:")
+        logger.info(f"[HONEYPOT-APP]   - Bank Accounts: {len(payload['extractedIntelligence']['bankAccounts'])}")
+        logger.info(f"[HONEYPOT-APP]   - Phone Numbers: {len(payload['extractedIntelligence']['phoneNumbers'])}")
         
         import json
-        logger.info(json.dumps(payload, indent=2, ensure_ascii=False))
+        logger.info(f"[HONEYPOT-APP] Full Payload: {json.dumps(payload)}")
         logger.debug(f"Callback payload: {payload}")
         
-        logger.info("🚀 Preparing to send HTTP POST request to GUVI callback endpoint")
-        logger.debug(f"GUVI Callback URL: {settings.guvi_callback_url}")
+        logger.info("[HONEYPOT-APP] 🚀 Preparing to send HTTP POST request to GUVI callback endpoint")
+        logger.debug(f"[HONEYPOT-APP] Target URL: {target_url}")
         
         async with httpx.AsyncClient() as client:
-            logger.info(f"📤 Sending POST request with scam intelligence data for session {session_id}")
+            logger.info(f"[HONEYPOT-APP] 📤 Sending POST request with scam intelligence data for session {session_id}")
             response = await client.post(
-                settings.guvi_callback_url,
+                target_url,
                 json=payload,
                 timeout=10.0,
                 headers={
@@ -113,9 +117,9 @@ async def send_guvi_callback(
                 }
             )
             
-            logger.info(f"📨 Received response from GUVI callback endpoint")
-            logger.info(f"Response Body: {response.text}")
-            logger.info("="*80)
+            logger.info(f"[HONEYPOT-APP] 📨 Received response from GUVI callback endpoint")
+            logger.info(f"[HONEYPOT-APP] Response Body: {response.text}")
+            logger.info("[HONEYPOT-APP] " + "="*80)
             
             # Save callback response to MongoDB
             success = response.status_code == 200

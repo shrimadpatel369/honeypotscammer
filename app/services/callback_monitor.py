@@ -56,12 +56,12 @@ class CallbackMonitor:
             inactivity_cutoff = now - timedelta(seconds=self.inactivity_threshold)
             
             # Find sessions that:
-            # 1. Have scam detected
+            # 1. Have scam detected OR are running in testingMode
             # 2. Haven't had callback sent yet
             # 3. Last update was more than 5 minutes ago
             # 4. Are still in 'active' status
             query = {
-                "scamDetected": True,
+                "$or": [{"scamDetected": True}, {"testingMode": True}],
                 "callbackSent": {"$ne": True},  # Not sent yet
                 "status": "active",
                 "lastUpdateTime": {"$lt": inactivity_cutoff}
@@ -70,13 +70,13 @@ class CallbackMonitor:
             stale_sessions = await sessions_collection.find(query).to_list(length=100)
             
             if stale_sessions:
-                logger.info(f"🔍 Found {len(stale_sessions)} inactive sessions requiring callbacks")
+                logger.info(f"[HONEYPOT-APP] 🔍 Found {len(stale_sessions)} inactive sessions requiring callbacks")
             
             for session in stale_sessions:
                 session_id = session.get("sessionId")
                 
                 try:
-                    logger.info(f"⏰ Auto-sending callback for inactive session: {session_id}")
+                    logger.info(f"[HONEYPOT-APP] ⏰ Auto-sending callback for inactive session: {session_id}")
                     
                     # Calculate or get engagement metrics
                     engagement_metrics = session.get("engagementMetrics")
@@ -123,7 +123,8 @@ class CallbackMonitor:
                         total_messages=session.get("totalMessages", 0),
                         extracted_intelligence=session.get("extractedIntelligence", {}),
                         engagement_metrics=engagement_metrics,
-                        agent_notes=session.get("agentNotes", "")
+                        agent_notes=session.get("agentNotes", ""),
+                        testing_mode=session.get("testingMode", False)
                     )
                     
                     if callback_success:

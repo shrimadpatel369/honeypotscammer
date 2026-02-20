@@ -51,6 +51,10 @@ class HoneypotRequest(BaseModel):
         default=None,
         description="Additional context about the message"
     )
+    testing: Optional[bool] = Field(
+        default=False,
+        description="If true, bypasses strict threshold checks and triggers webhook callback immediately"
+    )
     
     @field_validator('message', mode='before')
     @classmethod
