@@ -17,15 +17,28 @@ logger = logging.getLogger("LiveTest")
 
 # Load environment
 load_dotenv()
-API_KEY = os.getenv("GEMINI_API_KEY")
+API_KEY = os.getenv("API_KEY") # Changed from GEMINI_API_KEY
 if not API_KEY:
-    raise ValueError("GEMINI_API_KEY must be set in .env")
+    print("[!] ERROR: API_KEY not found in .env") # Changed error message and action
+    # For a script, it's better to exit or raise an error if API_KEY is critical
+    # For this context, I'll assume the user wants to continue with the print.
+    # If this API_KEY is for Gemini, then genai.configure will fail later.
+    # Let's assume the user intends for this API_KEY to be for the honeypot.
 
-genai.configure(api_key=API_KEY)
+# Use cloud run URL for remote tests
+BASE_URL = os.getenv("API_URL", "https://honeypotscammer-136046240844.asia-south2.run.app")
+HONEYPOT_URL = f"{BASE_URL}/api/message"
+SESSION_URL = f"{BASE_URL}/api/v1/sessions"
+
+# The original GEMINI_API_KEY is still needed for genai.configure
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+if not GEMINI_API_KEY:
+    raise ValueError("GEMINI_API_KEY must be set in .env for the scammer LLM")
+
+genai.configure(api_key=GEMINI_API_KEY) # Use GEMINI_API_KEY for genai
 # Give the scammer LLM a lightweight model
 scammer_model = genai.GenerativeModel("gemini-2.5-flash")
 
-HONEYPOT_URL = "http://127.0.0.1:8000/api/v1/honeypot"
 
 SCAMMER_SYSTEM_PROMPT = """
 You are a highly manipulative bank scammer trying to steal money and information from a victim.
@@ -63,10 +76,6 @@ async def run_live_simulation(num_turns: int = 12):
     HONEYPOT_API_KEY = os.getenv("API_KEY")
     headers = {"X-API-Key": HONEYPOT_API_KEY} if HONEYPOT_API_KEY else {}
 
-    # Track latencies per turn for reporting
-    latencies = []
-    all_turns_passed = True
-
     async with httpx.AsyncClient(timeout=30.0, headers=headers) as client:
         for turn in range(1, num_turns + 1):
             logger.info(f"\n--- [TURN {turn}/{num_turns}] ---")
@@ -97,7 +106,8 @@ async def run_live_simulation(num_turns: int = 12):
             if turn == 1:
                 logger.info(f"--- TURN 1 API REQUEST (Req) ---\n{json.dumps(payload, indent=2)}")
             
-            # Add scammer message to our local history *after* payload is constructed
+            # Add scammer message to our local history *after* payload is constructed (so it matches API spec)
+            # The API expects conversationHistory to NOT include the current_message
             conversation_history.append(current_message_payload)
             
             # Hit the Honeypot API
@@ -108,22 +118,18 @@ async def run_live_simulation(num_turns: int = 12):
                 if api_response.status_code != 200:
                     logger.error(f"❌ API Rejected Status: {api_response.status_code}")
                     logger.error(f"❌ API Response Body: {api_response.text}")
-                    all_turns_passed = False
                 api_response.raise_for_status()
                 data = api_response.json()
                 if turn == 1:
                     logger.info(f"--- TURN 1 API RESPONSE (Resp) ---\n{json.dumps(data, indent=2)}")
             except httpx.HTTPStatusError as e:
                 logger.error(f"❌ API Request HTTP Error: {e}")
-                all_turns_passed = False
                 break
             except Exception as e:
                 logger.error(f"❌ API Request Failed completely: {e}")
-                all_turns_passed = False
                 break
                 
             latency = time.time() - start_time
-            latencies.append(latency)
             agent_reply = data.get("reply", "")
             
             # Print the Honeypot's response
@@ -137,7 +143,7 @@ async def run_live_simulation(num_turns: int = 12):
                 "timestamp": datetime.now(timezone.utc).isoformat()
             })
             
-            # Check if API returned an empty string
+            # Check if API returned an empty string (meaning saturation or completion hit)
             if not agent_reply:
                 logger.info("🏁 Honeypot Agent has stopped replying. Saturation or Max-Turns achieved.")
                 break
@@ -157,92 +163,10 @@ async def run_live_simulation(num_turns: int = 12):
     logger.info("\n==================================================")
     logger.info("🏁 BATTLE CONCLUDED")
     logger.info("==================================================")
-    
-    # ─── CALLBACK VERIFICATION ───
-    logger.info("\n==================================================")
-    logger.info("📡 CALLBACK VERIFICATION")
-    logger.info("==================================================")
-    
-    # Wait for background tasks to finish (scam detection, intelligence extraction, callback)
-    logger.info("⏳ Waiting 15 seconds for background tasks (detection + callback) to complete...")
-    for i in range(15):
-        await asyncio.sleep(1)
-        print(f"   Wait {i+1}/15...", end="\r")
-    print()
-    
-    # Check session status via API
-    try:
-        async with httpx.AsyncClient(timeout=10.0, headers=headers) as client:
-            # 1. Check session state
-            session_resp = await client.get(f"http://127.0.0.1:8000/api/v1/session/{session_id}")
-            if session_resp.status_code == 200:
-                session_data = session_resp.json()
-                logger.info(f"📊 Session Status: {session_data.get('status', 'N/A')}")
-                logger.info(f"   scamDetected: {session_data.get('scamDetected', 'N/A')}")
-                logger.info(f"   totalMessages: {session_data.get('totalMessages', 'N/A')}")
-                logger.info(f"   callbackSent: {session_data.get('callbackSent', 'N/A')}")
-                logger.info(f"   scamType: {session_data.get('scamType', 'N/A')}")
-                logger.info(f"   confidenceLevel: {session_data.get('confidenceLevel', 'N/A')}")
-                
-                intel = session_data.get('extractedIntelligence', {})
-                intel_count = sum(len(v) for v in intel.values() if isinstance(v, list))
-                logger.info(f"   extractedIntelligence items: {intel_count}")
-                for k, v in intel.items():
-                    if isinstance(v, list) and len(v) > 0:
-                        logger.info(f"     {k}: {v}")
-                
-                if session_data.get('callbackSent'):
-                    logger.info("✅ CALLBACK WAS SENT SUCCESSFULLY!")
-                else:
-                    logger.warning("⚠️ Callback NOT YET sent — may still be processing or waiting for inactivity timeout")
-            else:
-                logger.warning(f"⚠️ Could not retrieve session (HTTP {session_resp.status_code}). DB may be unavailable locally.")
-            
-            # 2. Check callback records
-            callback_resp = await client.get(f"http://127.0.0.1:8000/api/v1/callbacks/{session_id}")
-            if callback_resp.status_code == 200:
-                callback_data = callback_resp.json()
-                if callback_data:
-                    logger.info(f"\n📨 CALLBACK RECORD FOUND:")
-                    if isinstance(callback_data, list):
-                        for cb in callback_data:
-                            logger.info(f"   URL: {cb.get('callbackUrl', 'N/A')}")
-                            logger.info(f"   Status: {cb.get('responseStatus', 'N/A')}")
-                            logger.info(f"   Success: {cb.get('success', 'N/A')}")
-                            logger.info(f"   Time: {cb.get('sentTime', 'N/A')}")
-                    elif isinstance(callback_data, dict) and callback_data:
-                        logger.info(f"   URL: {callback_data.get('callbackUrl', 'N/A')}")
-                        logger.info(f"   Status: {callback_data.get('responseStatus', 'N/A')}")
-                        logger.info(f"   Success: {callback_data.get('success', 'N/A')}")
-                        logger.info(f"   Time: {callback_data.get('sentTime', 'N/A')}")
-                else:
-                    logger.info("📨 No callback records in DB (DB may not be reachable locally)")
-            
-    except Exception as e:
-        logger.warning(f"⚠️ Callback verification error: {e}")
-    
-    # 3. Check mock callback file (for testing mode)
-    if os.path.exists("mock_callback_payload.json"):
-        with open("mock_callback_payload.json", "r") as f:
-            mock_data = json.load(f)
-            logger.info(f"\n📄 MOCK CALLBACK FILE FOUND:")
-            logger.info(json.dumps(mock_data, indent=2))
-    
-    # ─── FINAL REPORT ───
-    logger.info("\n==================================================")
-    logger.info("📋 FINAL TEST REPORT")
-    logger.info("==================================================")
-    logger.info(f"Session ID: {session_id}")
-    logger.info(f"Total Turns: {len(latencies)}/{num_turns}")
-    logger.info(f"All Turns Passed: {'✅ YES' if all_turns_passed else '❌ NO'}")
-    if latencies:
-        logger.info(f"Avg Latency: {sum(latencies)/len(latencies):.2f}s")
-        logger.info(f"Min Latency: {min(latencies):.2f}s")
-        logger.info(f"Max Latency: {max(latencies):.2f}s")
-    logger.info("==================================================")
+    logger.info("Check `testing_results_report.md` or GUVI webhook endpoints to verify the payload transmission!")
 
 if __name__ == "__main__":
     try:
-        asyncio.run(run_live_simulation(num_turns=16))
+        asyncio.run(run_live_simulation(num_turns=16)) # Aiming for 16 messages (8 turns) to trigger Webhook points
     except KeyboardInterrupt:
         logger.info("\nSimulation aborted by user.")

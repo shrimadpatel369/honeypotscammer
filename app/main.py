@@ -34,6 +34,11 @@ from app.logger import (
 setup_logging(debug=settings.debug)
 logger = logging.getLogger(__name__)
 
+# ─── Singleton service instances (avoid re-creation per request) ───
+_scam_detector = ScamDetectorService()
+_ai_agent = AIAgentService()
+_intelligence_extractor = IntelligenceExtractorService()
+
 
 
 
@@ -237,8 +242,8 @@ async def process_background_tasks(
 ):
     """Offloads heavy analytical and database operations out of the critical response path."""
     try:
-        scam_detector = ScamDetectorService()
-        intelligence_extractor = IntelligenceExtractorService()
+        scam_detector = _scam_detector
+        intelligence_extractor = _intelligence_extractor
         sessions_collection = Database.get_sessions_collection()
         cache_key = f"session_{honeypot_request.sessionId}"
         
@@ -249,6 +254,7 @@ async def process_background_tasks(
         scam_confidence = session.get("confidenceLevel", 0.0)
         
         if not scam_detected and len(all_messages) >= 2:
+            logger.info(f"[DETECTION] 🔍 Running scam detection for session {honeypot_request.sessionId} (msgs: {len(all_messages)})")
             detected, confidence, indicators, s_type = await scam_detector.detect_scam(
                 current_message=honeypot_request.message.text,
                 conversation_history=[msg.model_dump() for msg in all_messages],
@@ -259,13 +265,21 @@ async def process_background_tasks(
                 session["scamType"] = s_type
                 session["confidenceLevel"] = confidence
                 scam_indicators = indicators
-                logger.info(f"[HONEYPOT-APP] Background Scam Detected in session {honeypot_request.sessionId}")
+                logger.info(f"[DETECTION] 🚨 SCAM DETECTED in session {honeypot_request.sessionId} — type={s_type}, confidence={confidence:.2f}, indicators={indicators}")
+            else:
+                logger.info(f"[DETECTION] ✅ No scam detected in session {honeypot_request.sessionId} (confidence={confidence:.2f})")
+        elif scam_detected:
+            logger.info(f"[DETECTION] ⏭️ Skipping detection for {honeypot_request.sessionId} — already detected as {scam_type} ({scam_confidence:.2f})")
+        else:
+            logger.info(f"[DETECTION] ⏭️ Skipping detection for {honeypot_request.sessionId} — not enough messages ({len(all_messages)})")
                 
         # 2. Intelligence Extraction
         extracted_intelligence = await intelligence_extractor.extract_intelligence(
             conversation_history=[msg.model_dump() for msg in all_messages],
             current_extraction=session.get("extractedIntelligence", {})
         )
+        intel_summary = {k: len(v) for k, v in extracted_intelligence.items() if isinstance(v, list) and len(v) > 0}
+        logger.info(f"[INTEL] 📊 Extraction for {honeypot_request.sessionId}: {intel_summary if intel_summary else 'no items found'}")
         
         # 3. Synchronize Session State
         # NOTE: We NO LONGER store conversationHistory in memory/MongoDB to save massive amounts of space.
@@ -356,6 +370,41 @@ async def process_background_tasks(
                 logger.error(f"Background learning error: {e}")
                 
             if not session.get("callbackSent", False):
+                logger.info(f"[CALLBACK] 📡 Initiating callback for session {honeypot_request.sessionId} — "
+                           f"scamDetected={session['scamDetected']}, type={session.get('scamType','unknown')}, "
+                           f"confidence={session.get('confidenceLevel',0):.2f}, msgs={session['totalMessages']}, "
+                           f"duration={duration_seconds}s, testing={session.get('testingMode', False)}")
+                # ─── ATOMIC CALLBACK-ONCE GUARD ───
+                # Optimistically mark as sent immediately to prevent re-entry
+                # from concurrent background tasks or callback monitor
+                session["callbackSent"] = True
+                
+                # Atomic DB guard: only proceed if DB also confirms not yet sent
+                try:
+                    lock_result = await sessions_collection.find_one_and_update(
+                        {"sessionId": honeypot_request.sessionId, "callbackSent": {"$ne": True}},
+                        {"$set": {"callbackSent": True}},
+                        return_document=False  # returns the ORIGINAL doc (before update)
+                    )
+                    # If lock_result is None, another process already sent the callback
+                    if lock_result is None:
+                        # Check if session even exists in DB
+                        existing = await sessions_collection.find_one({"sessionId": honeypot_request.sessionId})
+                        if existing and existing.get("callbackSent"):
+                            logger.info(f"🔒 Callback already sent for {honeypot_request.sessionId} (DB guard). Skipping duplicate.")
+                            # Still need to save session and purge cache
+                            await sessions_collection.update_one(
+                                {"sessionId": honeypot_request.sessionId},
+                                {"$set": session},
+                                upsert=True
+                            )
+                            await cache.delete(cache_key)
+                            return  # Exit early, callback already sent
+                        # If session doesn't exist yet in DB, proceed (first write)
+                except Exception as db_lock_err:
+                    logger.warning(f"⚠️ DB callback lock check failed (DB may be unavailable): {db_lock_err}")
+                    # Proceed anyway — the in-memory flag is our fallback guard
+                
                 success = await send_guvi_callback(
                     session_id=honeypot_request.sessionId,
                     scam_detected=session["scamDetected"],
@@ -368,7 +417,6 @@ async def process_background_tasks(
                     testing_mode=session.get("testingMode", False)
                 )
                 if success:
-                    session["callbackSent"] = True
                     session["callbackSentTime"] = honeypot_request.message.timestamp.isoformat()
                     
                     # Store the exact payload parameters we fired off
@@ -382,8 +430,7 @@ async def process_background_tasks(
                         "agentNotes": session.get("agentNotes", "")
                     }
                     
-                    # Store the completed session including FULL conversation history into MongoDB asynchronously
-                    # We don't pop conversationHistory here so it gets permanently recorded.
+                    # Store the completed session into MongoDB
                     await sessions_collection.update_one(
                         {"sessionId": honeypot_request.sessionId},
                         {"$set": session},
@@ -391,9 +438,20 @@ async def process_background_tasks(
                     )
                     logger.info(f"💾 Permanently saved completed session {honeypot_request.sessionId} to MongoDB with full history")
                     
-                    # Optimization: Wipe the session from RAM Cache since the evaluation for this user is permanently over
+                    # Purge from RAM Cache since evaluation is permanently over
                     await cache.delete(cache_key)
                     logger.info(f"🧹 Purged completed session {honeypot_request.sessionId} from RAM Cache")
+                else:
+                    # Callback failed — reset the flag so it can be retried
+                    session["callbackSent"] = False
+                    try:
+                        await sessions_collection.update_one(
+                            {"sessionId": honeypot_request.sessionId},
+                            {"$set": {"callbackSent": False}},
+                        )
+                    except Exception:
+                        pass
+                    logger.error(f"❌ Callback failed for {honeypot_request.sessionId} — flag reset for retry")
                         
         # 6. Push to DB and Cache (Only if not completed & purged)
         if session.get("status") != "completed" or not session.get("callbackSent"):
@@ -473,10 +531,8 @@ async def honeypot_endpoint(request: Request, honeypot_request: HoneypotRequest,
     try:
         logger.info(f"📊 Processing request for session: {session_id}")
         
-        # Initialize services
-        scam_detector = ScamDetectorService()
-        ai_agent = AIAgentService()
-        intelligence_extractor = IntelligenceExtractorService()
+        # Use singleton services (module-level instances)
+        ai_agent = _ai_agent
         
         # Get or create session from memory cache first, fallback to DB
         sessions_collection = Database.get_sessions_collection()

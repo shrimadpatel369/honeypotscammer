@@ -18,43 +18,47 @@ genai.configure(api_key=settings.gemini_api_key)
 class AIAgentService:
     """Advanced AI Agent for engaging with scammers - Human-like behavior with dynamic responses"""
     
-    _model_cooldowns: Dict[str, datetime] = {}
+    # ─── Smart Model Rotation State (class-level, shared across all instances) ───
+    _model_cooldowns: Dict[str, datetime] = {}      # model -> cooldown expiry time
+    _failed_models: Dict[str, datetime] = {}         # model -> time of last failure (sticky)
+    _PROBE_INTERVAL = timedelta(minutes=5)            # how often to re-probe failed models
+    _COOLDOWN_DURATION = timedelta(seconds=90)        # cooldown after rate-limit / error
     
     def __init__(self):
-        # Comprehensive list of v1beta API compatible models (as of Feb 2026)
-        # Ordered by preference: Latest Gemini 3 > Gemini 2.5 > Gemini 2.0 > Gemini 1.5
-        self.supported_models = [
-            # Gemini 3 (Latest - Preview models)
-            "gemini-3-pro",          # Most intelligent multimodal model, 1M token context
-            "gemini-3-flash",        # Fast Gemini 3, balanced performance
-            
-            # Gemini 2.5 (Production - Best for complex reasoning)
-            "gemini-2.5-pro",                # Complex reasoning and coding, 1M token context
-            "gemini-2.5-flash",              # Balance of intelligence and latency
-            "gemini-2.5-flash-lite",         # Efficient high-frequency tasks
-            
-            # Gemini 2.0 (Experimental - Will retire March 31, 2026)
-            "gemini-2.0-flash-exp",          # Latest experimental flash model
-            
-            # Gemini 1.5 (Stable fallbacks - No retirement date)
-            "gemini-1.5-pro",                # Stable production model
-            "gemini-1.5-flash",              # Fast and efficient
-            "gemini-1.5-pro-latest",         # Auto-updated to latest 1.5 pro
-            "gemini-1.5-flash-latest",       # Auto-updated to latest 1.5 flash
-            "gemini-pro",                    # Legacy fallback (last resort)
-        ]
+        # ─── API-verified models (from genai.list_models()) ───
+        # Tier escalation: 2.5 (stable) → 3.1 (preview) → 3 (preview)
+        # flash-lite is fallback ONLY, never used as a primary tier model
         
-        # Activate Gemini 3 as the core reasoning engine tiers
-        self.pro_model = "gemini-3-pro"
-        self.flash_model = "gemini-3-flash"
-        self.lite_model = settings.gemini_model if "lite" in settings.gemini_model else "gemini-2.5-flash-lite"
+        # Per-tier fallback chains (ordered by preference within each tier)
+        self.tier_models = {
+            "flash": [
+                "gemini-2.5-flash",              # Primary: fast, stable
+                "gemini-2.0-flash",              # Fallback 1: also stable
+                "gemini-2.5-flash-lite",         # Fallback 2: degraded but fast
+            ],
+            "pro": [
+                "gemini-2.5-pro",                # Primary: best stable reasoning
+                "gemini-3.1-pro-preview",        # Fallback 1: newest preview
+                "gemini-3-pro-preview",          # Fallback 2: previous preview
+                "gemini-2.5-flash",              # Fallback 3: degrade to flash
+            ],
+            "premium": [
+                "gemini-3.1-pro-preview",        # Primary: most capable
+                "gemini-3-pro-preview",          # Fallback 1: prev gen preview
+                "gemini-2.5-pro",                # Fallback 2: stable pro
+                "gemini-2.5-flash",              # Fallback 3: degrade to flash
+            ],
+        }
         
-        # Validate legacy configured models being passed via env
-        if settings.gemini_model in ["gemini-pro-old", "gemini-1.0-pro"]:
-            logger.warning(f"⚠️ Configured model '{settings.gemini_model}' is deprecated. Using gemini-3-pro instead.")
-            self.pro_model = "gemini-3-pro"
+        # Flat list of all unique models (for reference / probing)
+        self.supported_models = list(dict.fromkeys(
+            m for chain in self.tier_models.values() for m in chain
+        ))
         
-        logger.info(f"✅ Initializing Dynamic Model Strategy: {self.lite_model} -> {self.flash_model} -> {self.pro_model}")
+        logger.info(f"✅ Smart Model Rotation initialized — tiers: flash → pro → premium")
+        logger.info(f"   Flash:   {self.tier_models['flash']}")
+        logger.info(f"   Pro:     {self.tier_models['pro']}")
+        logger.info(f"   Premium: {self.tier_models['premium']}")
         
         # Base generation config optimized for human-like natural responses
         self.generation_config = {
@@ -65,11 +69,11 @@ class AIAgentService:
             "candidate_count": 1,
         }
         
-        # Instantiate model tiers
+        # Pre-instantiate primary models per tier for fast first-call
         self.models = {
-            "lite": genai.GenerativeModel(self.lite_model, generation_config=self.generation_config),
-            "flash": genai.GenerativeModel(self.flash_model, generation_config=self.generation_config),
-            "pro": genai.GenerativeModel(self.pro_model, generation_config=self.generation_config)
+            "flash": genai.GenerativeModel(self.tier_models["flash"][0], generation_config=self.generation_config),
+            "pro": genai.GenerativeModel(self.tier_models["pro"][0], generation_config=self.generation_config),
+            "premium": genai.GenerativeModel(self.tier_models["premium"][0], generation_config=self.generation_config),
         }
         
         # Multi-lingual support - language detection and natural responses
@@ -1041,39 +1045,66 @@ MAKE YOUR RESPONSE NATURAL, HUMAN-LIKE, AND STRATEGICALLY DESIGNED TO EXTRACT MA
             response = None
             last_error = None
             
-            # Filter models to try based on cooldown
+            # ─── SMART MODEL ROTATION ───
             now = datetime.now()
-            
-            # Dynamically select starting model based on conversation length
             turn_count = context_analysis.get("message_count", 0)
-            target_model = self.lite_model
+            
+            # 1) Select tier based on conversation turn
             if turn_count > 6:
-                target_model = self.pro_model
+                selected_tier = "premium"   # Gemini 3.1 → 3 → 2.5-pro
             elif turn_count > 3:
-                target_model = self.flash_model
+                selected_tier = "pro"       # Gemini 2.5-pro → 3.1 → 3
+            else:
+                selected_tier = "flash"     # Gemini 2.5-flash → 2.0-flash → flash-lite
+            
+            tier_chain = self.tier_models[selected_tier]
+            
+            # 2) Build candidate list: skip models on cooldown or recently failed
+            #    But include failed models if their probe interval has elapsed
+            candidates = []
+            probed = []
+            for m in tier_chain:
+                # Check hard cooldown (rate limit)
+                if m in AIAgentService._model_cooldowns and now < AIAgentService._model_cooldowns[m]:
+                    remaining = (AIAgentService._model_cooldowns[m] - now).seconds
+                    logger.debug(f"⏳ {m} on cooldown for {remaining}s more, skipping")
+                    continue
+                    
+                # Check sticky failure memory
+                if m in AIAgentService._failed_models:
+                    fail_time = AIAgentService._failed_models[m]
+                    if now - fail_time < AIAgentService._PROBE_INTERVAL:
+                        # Still within probe interval — skip unless it's the only option
+                        logger.debug(f"🔇 {m} failed {(now - fail_time).seconds}s ago, skipping (probe in {(AIAgentService._PROBE_INTERVAL - (now - fail_time)).seconds}s)")
+                        probed.append(m)  # track for forced fallback
+                        continue
+                    else:
+                        # Probe interval elapsed — give it another chance
+                        logger.info(f"🔍 Probing {m} — last failure was {(now - fail_time).seconds}s ago")
+                        del AIAgentService._failed_models[m]
                 
-            base_models = [target_model] + [m for m in self.supported_models if m != target_model]
+                candidates.append(m)
             
-            models_to_try = [m for m in base_models if m not in AIAgentService._model_cooldowns or now > AIAgentService._model_cooldowns[m]]
+            # 3) If all candidates are exhausted, force-add probed models as last resort
+            if not candidates:
+                logger.warning(f"⚠️ All {selected_tier} tier models failed/cooled! Force-probing: {probed}")
+                candidates = probed if probed else tier_chain[:1]  # absolute last resort
             
-            if not models_to_try:
-                logger.warning("⚠️ All agent models on cooldown! Forced to use target model.")
-                models_to_try = [target_model]
+            logger.info(f"🎯 Turn {turn_count} → tier={selected_tier}, candidates={candidates}")
             
-            for attempt, model_name in enumerate(models_to_try, 1):
+            for attempt, model_name in enumerate(candidates, 1):
                 try:
                     # Adjust model settings for this specific response - high creativity
-                    # Use persona temperature directly for variety, boost it for longer conversations
                     effective_temp = persona_temp
                     if context_analysis["message_count"] > 10:
-                        effective_temp = min(1.0, persona_temp + 0.15)  # Add variety in longer conversations
+                        effective_temp = min(1.0, persona_temp + 0.15)
                     
-                    # Dynamic Window Expansion: Later conversation turns require more tokens to prevent truncation
+                    # Dynamic Window Expansion: Later turns need more tokens
                     dynamic_token_limit = settings.gemini_max_output_tokens
-                    if context_analysis["message_count"] > 10:
-                        dynamic_token_limit = 2000
-                    elif context_analysis["message_count"] > 20:
+                    if context_analysis["message_count"] > 20:
                         dynamic_token_limit = 4000
+                    elif context_analysis["message_count"] > 10:
+                        dynamic_token_limit = 2000
                     
                     config = genai.types.GenerationConfig(
                         temperature=effective_temp,
@@ -1091,7 +1122,11 @@ MAKE YOUR RESPONSE NATURAL, HUMAN-LIKE, AND STRATEGICALLY DESIGNED TO EXTRACT MA
                         request_options={'timeout': settings.gemini_timeout}
                     )
                     
-                    # Success! Log if we had to fallback
+                    # ✅ Success — clear any lingering failure memory for this model
+                    if model_name in AIAgentService._failed_models:
+                        logger.info(f"🟢 Model {model_name} recovered! Clearing failure memory.")
+                        del AIAgentService._failed_models[model_name]
+                    
                     if attempt > 1:
                         logger.info(f"✅ Switched to fallback model: {model_name} (attempt {attempt})")
                     
@@ -1101,31 +1136,24 @@ MAKE YOUR RESPONSE NATURAL, HUMAN-LIKE, AND STRATEGICALLY DESIGNED TO EXTRACT MA
                     last_error = e
                     error_msg = str(e).lower()
                     
+                    # ─── Sticky failure: remember this model failed ───
+                    AIAgentService._failed_models[model_name] = now
+                    
                     if "429" in error_msg or "quota" in error_msg or "exhausted" in error_msg:
-                        logger.warning(f"🚨 RPM LIMIT HIT for {model_name}. Putting on 60s cooldown.")
-                        AIAgentService._model_cooldowns[model_name] = datetime.now() + timedelta(seconds=60)
-                        
-                        if attempt < len(models_to_try):
-                            logger.info(f"🔄 Falling back from {model_name} to next model...")
-                            continue
-                        else:
-                            logger.error(f"❌ All {len(models_to_try)} models exhausted!")
-                            break
-                            
-                    # Check if it's a model not found error
+                        logger.warning(f"🚨 RPM LIMIT HIT for {model_name}. Cooldown {AIAgentService._COOLDOWN_DURATION.seconds}s + sticky fail.")
+                        AIAgentService._model_cooldowns[model_name] = now + AIAgentService._COOLDOWN_DURATION
                     elif "404" in error_msg or "not found" in error_msg:
-                        logger.warning(f"⚠️ Model '{model_name}' not available (attempt {attempt}/{len(models_to_try)}): {error_msg}")
-                        
-                        # Try next model if available
-                        if attempt < len(models_to_try):
-                            logger.info(f"🔄 Trying next fallback model...")
-                            continue
-                        else:
-                            logger.error(f"❌ All {len(models_to_try)} models failed!")
-                            break
+                        logger.warning(f"⚠️ Model '{model_name}' not available — marked as failed.")
+                    elif "timeout" in error_msg or "504" in error_msg:
+                        logger.warning(f"⏱️ Model '{model_name}' timed out — marked as failed.")
                     else:
-                        # Non-404 error, don't retry
                         logger.error(f"❌ Error with model '{model_name}': {error_msg}")
+                    
+                    if attempt < len(candidates):
+                        logger.info(f"🔄 Falling back from {model_name} to {candidates[attempt]}...")
+                        continue
+                    else:
+                        logger.error(f"❌ All {len(candidates)} candidates in {selected_tier} tier exhausted!")
                         break
             
             # If all models failed, raise the last error

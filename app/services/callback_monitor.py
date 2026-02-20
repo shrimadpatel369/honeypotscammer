@@ -1,6 +1,7 @@
 import asyncio
 from datetime import datetime, timedelta, timezone
 from app.database import Database
+from app.config import settings
 from app.utils.callback import send_guvi_callback
 import logging
 
@@ -12,7 +13,7 @@ class CallbackMonitor:
     
     def __init__(self):
         self.check_interval = 30  # Check every 30 seconds for faster response
-        self.inactivity_threshold = 90  # 1.5 minutes of inactivity (fast for evaluators)
+        self.inactivity_threshold = int(settings.inactivity_threshold_minutes * 60)  # From config
         self.is_running = False
         self.task = None
     
@@ -114,6 +115,18 @@ class CallbackMonitor:
                                 "totalMessagesExchanged": session.get("totalMessages", 0)
                             }
                     
+                    # ─── ATOMIC CALLBACK-ONCE GUARD ───
+                    # Atomically claim this session to prevent race with process_background_tasks
+                    lock_result = await sessions_collection.find_one_and_update(
+                        {"sessionId": session_id, "callbackSent": {"$ne": True}},
+                        {"$set": {"callbackSent": True}},
+                        return_document=False
+                    )
+                    if lock_result is None:
+                        # Another process already claimed this session
+                        logger.info(f"🔒 Callback already claimed for {session_id} (monitor skipping)")
+                        continue
+                    
                     # Send callback
                     callback_success = await send_guvi_callback(
                         session_id=session_id,
@@ -128,12 +141,11 @@ class CallbackMonitor:
                     )
                     
                     if callback_success:
-                        # Mark callback as sent
+                        # Mark callback as sent with timestamp
                         await sessions_collection.update_one(
                             {"sessionId": session_id},
                             {
                                 "$set": {
-                                    "callbackSent": True,
                                     "callbackSentTime": now,
                                     "status": "completed"
                                 }
@@ -141,7 +153,12 @@ class CallbackMonitor:
                         )
                         logger.info(f"✅ Auto-callback sent successfully for session {session_id}")
                     else:
-                        logger.error(f"❌ Auto-callback failed for session {session_id}")
+                        # Callback failed — reset the flag so it can be retried
+                        await sessions_collection.update_one(
+                            {"sessionId": session_id},
+                            {"$set": {"callbackSent": False}}
+                        )
+                        logger.error(f"❌ Auto-callback failed for session {session_id} — flag reset for retry")
                 
                 except Exception as e:
                     logger.error(f"Error sending auto-callback for session {session_id}: {e}", exc_info=True)

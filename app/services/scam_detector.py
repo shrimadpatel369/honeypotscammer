@@ -16,16 +16,22 @@ genai.configure(api_key=settings.gemini_api_key)
 class ScamDetectorService:
     """Service for detecting scam intent in messages - Optimized for premium Gemini"""
     
-    _model_cooldowns: Dict[str, datetime] = {}
+    # ─── Smart Model Rotation State (class-level, shared) ───
+    _model_cooldowns: Dict[str, datetime] = {}       # model -> cooldown expiry
+    _failed_models: Dict[str, datetime] = {}          # model -> last failure time (sticky)
+    _PROBE_INTERVAL = timedelta(minutes=5)
+    _COOLDOWN_DURATION = timedelta(seconds=90)
     
     def __init__(self):
+        # Detection uses fast models primarily (classification task)
+        # Fallback chain: stable flash → stable pro → preview models
         self.supported_models = [
-            settings.gemini_model,           # Primary (e.g., gemini-2.5-flash-lite)
-            "gemini-3-flash",                # Next-Gen Fallback 1
-            "gemini-2.5-flash",              # Stable Fallback 2
-            "gemini-1.5-flash",              # Stable Fallback 3
-            "gemini-3-pro",                  # Advanced Fallback 4
-            "gemini-2.5-pro",                # Advanced Fallback 5
+            "gemini-2.5-flash",              # Primary: fast, stable
+            "gemini-2.0-flash",              # Fallback 1: also stable
+            "gemini-2.5-flash-lite",         # Fallback 2: degraded but fast
+            "gemini-2.5-pro",                # Fallback 3: advanced stable
+            "gemini-3.1-pro-preview",        # Fallback 4: newest preview
+            "gemini-3-pro-preview",          # Fallback 5: previous preview
         ]
         
         self.generation_config = {
@@ -123,45 +129,75 @@ Must return ONLY a valid JSON object matching exactly this schema:
     "severity": "high/medium/low"
 }}"""
 
-            # Generate response with smart fallback and cooldown logic
+            # ─── SMART MODEL ROTATION (matching ai_agent.py pattern) ───
             now = datetime.now()
-            available_models = [m for m in self.supported_models if m not in ScamDetectorService._model_cooldowns or now > ScamDetectorService._model_cooldowns[m]]
+            candidates = []
+            probed = []
             
-            if not available_models:
-                logger.warning("⚠️ All detection models are on cooldown! Forced to use primary model.")
-                available_models = [self.supported_models[0]]
+            for m in self.supported_models:
+                # Check hard cooldown
+                if m in ScamDetectorService._model_cooldowns and now < ScamDetectorService._model_cooldowns[m]:
+                    continue
+                # Check sticky failure memory
+                if m in ScamDetectorService._failed_models:
+                    fail_time = ScamDetectorService._failed_models[m]
+                    if now - fail_time < ScamDetectorService._PROBE_INTERVAL:
+                        probed.append(m)
+                        continue
+                    else:
+                        # Probe interval elapsed — re-try
+                        logger.info(f"🔍 Probing detection model {m} — last failure {(now - fail_time).seconds}s ago")
+                        del ScamDetectorService._failed_models[m]
+                candidates.append(m)
+            
+            if not candidates:
+                logger.warning("⚠️ All detection models failed/cooled! Force-probing.")
+                candidates = probed if probed else self.supported_models[:1]
                 
             response_text = ""
             last_error = None
             
-            for model_name in available_models:
-                model = genai.GenerativeModel(model_name, generation_config=self.generation_config)
-                success = False
-                
-                for attempt in range(settings.gemini_max_retries):
-                    try:
-                        response = model.generate_content(
-                            prompt,
-                            request_options={'timeout': 12.0} # Strict 12s timeout
-                        )
-                        response_text = response.text.strip()
-                        success = True
-                        break # Success for this attempt loop
-                    except Exception as e:
-                        last_error = e
-                        error_msg = str(e).lower()
-                        logger.warning(f"Detection API attempt {attempt + 1} failed on {model_name}: {e}")
-                        
-                        if "429" in error_msg or "quota" in error_msg or "exhausted" in error_msg:
-                            logger.warning(f"🚨 RPM LIMIT HIT for {model_name}. Putting on 60s cooldown.")
-                            ScamDetectorService._model_cooldowns[model_name] = datetime.now() + timedelta(seconds=60)
-                            break # Skip remaining retries for this model, move to next fallback model
-                            
-                        if attempt == settings.gemini_max_retries - 1:
-                            logger.warning(f"Max retries reached for {model_name}.")
-                
-                if success:
+            for attempt, model_name in enumerate(candidates, 1):
+                try:
+                    model = genai.GenerativeModel(model_name, generation_config=self.generation_config)
+                    response = model.generate_content(
+                        prompt,
+                        request_options={'timeout': 12.0}
+                    )
+                    response_text = response.text.strip()
+                    
+                    # ✅ Success — clear failure memory
+                    if model_name in ScamDetectorService._failed_models:
+                        logger.info(f"🟢 Detection model {model_name} recovered!")
+                        del ScamDetectorService._failed_models[model_name]
+                    
+                    if attempt > 1:
+                        logger.info(f"✅ Detection fell back to {model_name} (attempt {attempt})")
                     break
+                    
+                except Exception as e:
+                    last_error = e
+                    error_msg = str(e).lower()
+                    
+                    # Sticky failure
+                    ScamDetectorService._failed_models[model_name] = now
+                    
+                    if "429" in error_msg or "quota" in error_msg or "exhausted" in error_msg:
+                        logger.warning(f"🚨 Detection RPM LIMIT for {model_name}. Cooldown {ScamDetectorService._COOLDOWN_DURATION.seconds}s.")
+                        ScamDetectorService._model_cooldowns[model_name] = now + ScamDetectorService._COOLDOWN_DURATION
+                    elif "404" in error_msg or "not found" in error_msg:
+                        logger.warning(f"⚠️ Detection model '{model_name}' not available — marked failed.")
+                    elif "timeout" in error_msg or "504" in error_msg:
+                        logger.warning(f"⏱️ Detection model '{model_name}' timed out — marked failed.")
+                    else:
+                        logger.error(f"❌ Detection error with '{model_name}': {error_msg}")
+                    
+                    if attempt < len(candidates):
+                        logger.info(f"🔄 Detection falling back to {candidates[attempt]}...")
+                        continue
+                    else:
+                        logger.error(f"❌ All {len(candidates)} detection models exhausted!")
+                        break
                     
             if not response_text:
                 raise last_error if last_error else Exception("All detection models failed to generate response")

@@ -2,10 +2,13 @@ import httpx
 from app.config import settings
 from typing import Dict, Any
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from app.database import Database
 
 logger = logging.getLogger(__name__)
+
+# ─── Persistent HTTP client for callbacks (reuses TCP connections) ───
+_callback_client = httpx.AsyncClient(timeout=10.0)
 
 
 async def send_guvi_callback(
@@ -106,50 +109,48 @@ async def send_guvi_callback(
         logger.info("[HONEYPOT-APP] 🚀 Preparing to send HTTP POST request to GUVI callback endpoint")
         logger.debug(f"[HONEYPOT-APP] Target URL: {target_url}")
         
-        async with httpx.AsyncClient() as client:
-            logger.info(f"[HONEYPOT-APP] 📤 Sending POST request with scam intelligence data for session {session_id}")
-            response = await client.post(
-                target_url,
-                json=payload,
-                timeout=10.0,
-                headers={
-                    "Content-Type": "application/json"
-                }
-            )
-            
-            logger.info(f"[HONEYPOT-APP] 📨 Received response from GUVI callback endpoint")
-            logger.info(f"[HONEYPOT-APP] Response Body: {response.text}")
-            logger.info("[HONEYPOT-APP] " + "="*80)
-            
-            # Save callback response to MongoDB
-            success = response.status_code == 200
-            callback_response_doc = {
-                "sessionId": session_id,
-                "callbackUrl": settings.guvi_callback_url,
-                "sentPayload": payload,
-                "responseStatus": response.status_code,
-                "responseBody": response.text,
-                "sentTime": datetime.utcnow(),
-                "success": success,
-                "error": None if success else f"HTTP {response.status_code}"
+        logger.info(f"[HONEYPOT-APP] 📤 Sending POST request with scam intelligence data for session {session_id}")
+        response = await _callback_client.post(
+            target_url,
+            json=payload,
+            headers={
+                "Content-Type": "application/json"
             }
-            
-            try:
-                callbacks_collection = Database.get_callbacks_collection()
-                result = await callbacks_collection.insert_one(callback_response_doc)
-                logger.info(f"💾 Callback response saved to MongoDB with ID: {result.inserted_id}")
-            except Exception as db_error:
-                logger.error(f"⚠️ Failed to save callback response to MongoDB: {str(db_error)}", exc_info=True)
-            
-            if success:
-                logger.info(f"✅ Successfully sent GUVI callback for session {session_id}")
-                return True
-            else:
-                logger.error(
-                    f"❌ GUVI callback failed for session {session_id}: "
-                    f"Status {response.status_code}, Response: {response.text}"
-                )
-                return False
+        )
+        
+        logger.info(f"[HONEYPOT-APP] 📨 Received response from GUVI callback endpoint")
+        logger.info(f"[HONEYPOT-APP] Response Body: {response.text}")
+        logger.info("[HONEYPOT-APP] " + "="*80)
+        
+        # Save callback response to MongoDB
+        success = response.status_code == 200
+        callback_response_doc = {
+            "sessionId": session_id,
+            "callbackUrl": settings.guvi_callback_url,
+            "sentPayload": payload,
+            "responseStatus": response.status_code,
+            "responseBody": response.text,
+            "sentTime": datetime.now(timezone.utc),
+            "success": success,
+            "error": None if success else f"HTTP {response.status_code}"
+        }
+        
+        try:
+            callbacks_collection = Database.get_callbacks_collection()
+            result = await callbacks_collection.insert_one(callback_response_doc)
+            logger.info(f"💾 Callback response saved to MongoDB with ID: {result.inserted_id}")
+        except Exception as db_error:
+            logger.error(f"⚠️ Failed to save callback response to MongoDB: {str(db_error)}", exc_info=True)
+        
+        if success:
+            logger.info(f"✅ Successfully sent GUVI callback for session {session_id}")
+            return True
+        else:
+            logger.error(
+                f"❌ GUVI callback failed for session {session_id}: "
+                f"Status {response.status_code}, Response: {response.text}"
+            )
+            return False
                 
     except httpx.TimeoutException:
         logger.error(f"⏱️ GUVI callback timeout for session {session_id}")
