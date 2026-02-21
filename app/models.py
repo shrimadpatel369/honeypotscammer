@@ -51,10 +51,6 @@ class HoneypotRequest(BaseModel):
         default=None,
         description="Additional context about the message"
     )
-    testing: Optional[bool] = Field(
-        default=False,
-        description="If true, bypasses strict threshold checks and triggers webhook callback immediately"
-    )
     
     @field_validator('message', mode='before')
     @classmethod
@@ -96,9 +92,6 @@ class ExtractedIntelligence(BaseModel):
     phoneNumbers: List[str] = Field(default_factory=list)
     emailAddresses: List[str] = Field(default_factory=list)
     suspiciousKeywords: List[str] = Field(default_factory=list)
-    caseIds: List[str] = Field(default_factory=list)
-    policyNumbers: List[str] = Field(default_factory=list)
-    orderNumbers: List[str] = Field(default_factory=list)
 
 
 class EngagementMetrics(BaseModel):
@@ -110,13 +103,37 @@ class EngagementMetrics(BaseModel):
 class HoneypotResponse(BaseModel):
     """Response from the honeypot API"""
     status: str = Field(default="success")
-    reply: Optional[str] = Field(None, description="Your honeypot's response to the scammer")
+    sessionId: str
+    scamDetected: bool
+    reply: Optional[str] = Field(None, description="AI agent's response to continue conversation")
+    shouldContinue: bool = Field(
+        default=True,
+        description="Whether the conversation should continue"
+    )
+    engagementMetrics: EngagementMetrics
+    extractedIntelligence: ExtractedIntelligence
+    agentNotes: str = Field(default="")
 
     class Config:
         json_schema_extra = {
             "example": {
                 "status": "success",
-                "reply": "Oh no! Why would my account be blocked?"
+                "sessionId": "wertyu-dfghj-ertyui",
+                "scamDetected": True,
+                "reply": "Oh no! Why would my account be blocked?",
+                "shouldContinue": True,
+                "engagementMetrics": {
+                    "engagementDurationSeconds": 120,
+                    "totalMessagesExchanged": 3
+                },
+                "extractedIntelligence": {
+                    "bankAccounts": [],
+                    "upiIds": [],
+                    "phishingLinks": [],
+                    "phoneNumbers": [],
+                    "suspiciousKeywords": ["blocked", "verify", "immediately"]
+                },
+                "agentNotes": "Initial scam detection - urgency tactics detected"
             }
         }
 
@@ -125,11 +142,7 @@ class GuviCallbackPayload(BaseModel):
     """Payload for GUVI final result callback"""
     sessionId: str
     scamDetected: bool
-    scamType: Optional[str] = Field(default=None)
-    confidenceLevel: Optional[float] = Field(default=None)
     totalMessagesExchanged: int
-    engagementDurationSeconds: int
-    engagementMetrics: Optional[Dict[str, int]] = Field(default=None)
     extractedIntelligence: ExtractedIntelligence
     agentNotes: str
 
@@ -139,7 +152,7 @@ class SessionDocument(BaseModel):
     """MongoDB session document"""
     sessionId: str
     scamDetected: bool
-    conversationHistory: Optional[List[Dict[str, Any]]] = Field(default_factory=list)
+    conversationHistory: List[Dict[str, Any]]
     extractedIntelligence: Dict[str, Any]
     metadata: Dict[str, Any]
     startTime: datetime

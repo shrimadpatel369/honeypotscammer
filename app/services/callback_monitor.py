@@ -1,7 +1,6 @@
 import asyncio
 from datetime import datetime, timedelta, timezone
 from app.database import Database
-from app.config import settings
 from app.utils.callback import send_guvi_callback
 import logging
 
@@ -13,7 +12,7 @@ class CallbackMonitor:
     
     def __init__(self):
         self.check_interval = 30  # Check every 30 seconds for faster response
-        self.inactivity_threshold = int(settings.inactivity_threshold_minutes * 60)  # From config
+        self.inactivity_threshold = 90  # 1.5 minutes of inactivity (fast for evaluators)
         self.is_running = False
         self.task = None
     
@@ -57,12 +56,12 @@ class CallbackMonitor:
             inactivity_cutoff = now - timedelta(seconds=self.inactivity_threshold)
             
             # Find sessions that:
-            # 1. Have scam detected OR are running in testingMode
+            # 1. Have scam detected
             # 2. Haven't had callback sent yet
             # 3. Last update was more than 5 minutes ago
             # 4. Are still in 'active' status
             query = {
-                "$or": [{"scamDetected": True}, {"testingMode": True}],
+                "scamDetected": True,
                 "callbackSent": {"$ne": True},  # Not sent yet
                 "status": "active",
                 "lastUpdateTime": {"$lt": inactivity_cutoff}
@@ -71,7 +70,7 @@ class CallbackMonitor:
             stale_sessions = await sessions_collection.find(query).to_list(length=100)
             
             if stale_sessions:
-                logger.info(f"[HONEYPOT-APP] 🔍 Found {len(stale_sessions)} inactive sessions requiring callbacks")
+                logger.info(f"🔍 Found {len(stale_sessions)} inactive sessions requiring callbacks")
             
             for session in stale_sessions:
                 session_id = session.get("sessionId")
@@ -79,23 +78,59 @@ class CallbackMonitor:
                 try:
                     logger.info(f"⏰ Auto-sending callback for inactive session: {session_id}")
                     
+                    # Calculate or get engagement metrics
+                    engagement_metrics = session.get("engagementMetrics")
+                    
+                    if not engagement_metrics:
+                        # Fallback calculation if not saved in session
+                        try:
+                            start_time = session.get("startTime")
+                            last_update = session.get("lastUpdateTime")
+                            duration = 0
+                            
+                            if start_time and last_update:
+                                # Handle string timestamps
+                                if isinstance(start_time, str):
+                                    start_time = datetime.fromisoformat(start_time.replace('Z', '+00:00'))
+                                if isinstance(last_update, str):
+                                    last_update = datetime.fromisoformat(last_update.replace('Z', '+00:00'))
+                                
+                                # Ensure timezone awareness
+                                if start_time.tzinfo is None:
+                                    start_time = start_time.replace(tzinfo=timezone.utc)
+                                if last_update.tzinfo is None:
+                                    last_update = last_update.replace(tzinfo=timezone.utc)
+                                    
+                                duration = max(0, int((last_update - start_time).total_seconds()))
+                                
+                            engagement_metrics = {
+                                "engagementDurationSeconds": duration,
+                                "totalMessagesExchanged": session.get("totalMessages", 0)
+                            }
+                        except Exception as metric_error:
+                            logger.error(f"Error calculating metrics for inactive session: {metric_error}")
+                            engagement_metrics = {
+                                "engagementDurationSeconds": 0,
+                                "totalMessagesExchanged": session.get("totalMessages", 0)
+                            }
+                    
                     # Send callback
                     callback_success = await send_guvi_callback(
                         session_id=session_id,
                         scam_detected=session.get("scamDetected", False),
-                        scam_type=session.get("scamType", "unknown"),
-                        confidence_level=session.get("confidenceLevel", 0.0),
                         total_messages=session.get("totalMessages", 0),
                         extracted_intelligence=session.get("extractedIntelligence", {}),
-                        agent_notes=session.get("agentNotes", "").strip(" |")
+                        engagement_metrics=engagement_metrics,
+                        agent_notes=session.get("agentNotes", "")
                     )
                     
                     if callback_success:
-                        # Mark callback as sent with timestamp
+                        # Mark callback as sent
                         await sessions_collection.update_one(
                             {"sessionId": session_id},
                             {
                                 "$set": {
+                                    "callbackSent": True,
                                     "callbackSentTime": now,
                                     "status": "completed"
                                 }
@@ -103,12 +138,7 @@ class CallbackMonitor:
                         )
                         logger.info(f"✅ Auto-callback sent successfully for session {session_id}")
                     else:
-                        # Callback failed — reset the flag so it can be retried
-                        await sessions_collection.update_one(
-                            {"sessionId": session_id},
-                            {"$set": {"callbackSent": False}}
-                        )
-                        logger.error(f"❌ Auto-callback failed for session {session_id} — flag reset for retry")
+                        logger.error(f"❌ Auto-callback failed for session {session_id}")
                 
                 except Exception as e:
                     logger.error(f"Error sending auto-callback for session {session_id}: {e}", exc_info=True)

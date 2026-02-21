@@ -4,7 +4,6 @@ import logging
 from typing import List, Tuple, Dict, Any
 import json
 import hashlib
-from datetime import datetime, timedelta
 from app.cache import cache
 
 logger = logging.getLogger(__name__)
@@ -16,40 +15,33 @@ genai.configure(api_key=settings.gemini_api_key)
 class ScamDetectorService:
     """Service for detecting scam intent in messages - Optimized for premium Gemini"""
     
-    # ─── Smart Model Rotation State (class-level, shared) ───
-    _model_cooldowns: Dict[str, datetime] = {}       # model -> cooldown expiry
-    _failed_models: Dict[str, datetime] = {}          # model -> last failure time (sticky)
-    _PROBE_INTERVAL = timedelta(minutes=5)
-    _COOLDOWN_DURATION = timedelta(seconds=90)
-    
     def __init__(self):
-        # Detection uses fast models primarily (classification task)
-        # Fallback chain: stable flash → stable pro → preview models
-        self.supported_models = [
-            "gemini-2.5-flash",              # Primary: fast, stable
-            "gemini-2.0-flash",              # Fallback 1: also stable
-            "gemini-2.5-flash-lite",         # Fallback 2: degraded but fast
-            "gemini-2.5-pro",                # Fallback 3: advanced stable
-            "gemini-3.1-pro-preview",        # Fallback 4: newest preview
-            "gemini-3-pro-preview",          # Fallback 5: previous preview
-        ]
+        # Use premium model with optimized generation config
+        # Use a compact generation configuration for faster detection responses
+        self.model = genai.GenerativeModel(
+            settings.gemini_model,
+            generation_config={
+                "temperature": 0.0,  # Deterministic for detection
+                "top_p": 0.9,
+                "top_k": 40,
+                "max_output_tokens": settings.gemini_max_output_tokens,
+                "candidate_count": 1,
+            }
+        )
         
-        self.generation_config = {
-            "temperature": 0.0,  # Deterministic for detection
-            "top_p": 0.9,
-            "top_k": 40,
-            "max_output_tokens": settings.gemini_max_output_tokens,
-            "candidate_count": 1,
-        }
+    def _get_cache_key(self, message: str, history_length: int) -> str:
+        """Generate cache key for scam detection"""
+        content = f"{message}:{history_length}"
+        return f"scam_detect:{hashlib.md5(content.encode()).hexdigest()}"
         
     async def detect_scam(
         self,
         current_message: str,
         conversation_history: List[Dict[str, Any]],
         metadata: Dict[str, Any]
-    ) -> Tuple[bool, float, List[str], str]:
+    ) -> Tuple[bool, float, List[str]]:
         """
-        Detect if a message contains scam intent
+        Detect if a message contains scam intent with caching
         
         Args:
             current_message: The latest message to analyze
@@ -57,8 +49,15 @@ class ScamDetectorService:
             metadata: Additional context (channel, language, locale)
             
         Returns:
-            Tuple of (scam_detected, confidence, indicators, scam_type)
+            Tuple of (scam_detected, confidence, indicators)
         """
+        # Check cache first for performance
+        if settings.enable_caching:
+            cache_key = self._get_cache_key(current_message, len(conversation_history))
+            cached_result = await cache.get(cache_key)
+            if cached_result:
+                logger.debug(f"Cache hit for scam detection")
+                return cached_result
         
         try:
             # Build context from conversation history
@@ -118,89 +117,29 @@ MEDIUM SEVERITY:
 - Poor grammar in professional contexts
 - Requests for personal information verification
 
-Analyze comprehensively. To maximize hackathon evaluation scoring, if you detect a scam you MUST provide at least 5 distinct scam indicators in the `indicators` array.
-Must return ONLY a valid JSON object matching exactly this schema:
+Analyze comprehensively and respond ONLY with valid JSON:
 {{
     "is_scam": true/false,
-    "scam_type": "bank_fraud/upi_fraud/phishing/tech_support/lottery/unknown",
     "confidence": 0.0-1.0,
     "indicators": ["indicator1", "indicator2"],
     "reasoning": "brief technical explanation",
     "severity": "high/medium/low"
 }}"""
 
-            # ─── SMART MODEL ROTATION (matching ai_agent.py pattern) ───
-            now = datetime.now()
-            candidates = []
-            probed = []
-            
-            for m in self.supported_models:
-                # Check hard cooldown
-                if m in ScamDetectorService._model_cooldowns and now < ScamDetectorService._model_cooldowns[m]:
-                    continue
-                # Check sticky failure memory
-                if m in ScamDetectorService._failed_models:
-                    fail_time = ScamDetectorService._failed_models[m]
-                    if now - fail_time < ScamDetectorService._PROBE_INTERVAL:
-                        probed.append(m)
-                        continue
-                    else:
-                        # Probe interval elapsed — re-try
-                        logger.info(f"🔍 Probing detection model {m} — last failure {(now - fail_time).seconds}s ago")
-                        del ScamDetectorService._failed_models[m]
-                candidates.append(m)
-            
-            if not candidates:
-                logger.warning("⚠️ All detection models failed/cooled! Force-probing.")
-                candidates = probed if probed else self.supported_models[:1]
-                
-            response_text = ""
-            last_error = None
-            
-            for attempt, model_name in enumerate(candidates, 1):
+            # Generate response with retry logic
+            for attempt in range(settings.gemini_max_retries):
                 try:
-                    model = genai.GenerativeModel(model_name, generation_config=self.generation_config)
-                    response = model.generate_content(
+                    response = self.model.generate_content(
                         prompt,
-                        request_options={'timeout': 12.0}
+                        request_options={'timeout': settings.gemini_timeout}
                     )
                     response_text = response.text.strip()
-                    
-                    # ✅ Success — clear failure memory
-                    if model_name in ScamDetectorService._failed_models:
-                        logger.info(f"🟢 Detection model {model_name} recovered!")
-                        del ScamDetectorService._failed_models[model_name]
-                    
-                    if attempt > 1:
-                        logger.info(f"✅ Detection fell back to {model_name} (attempt {attempt})")
                     break
-                    
                 except Exception as e:
-                    last_error = e
-                    error_msg = str(e).lower()
-                    
-                    # Sticky failure
-                    ScamDetectorService._failed_models[model_name] = now
-                    
-                    if "429" in error_msg or "quota" in error_msg or "exhausted" in error_msg:
-                        logger.warning(f"🚨 Detection RPM LIMIT for {model_name}. Cooldown {ScamDetectorService._COOLDOWN_DURATION.seconds}s.")
-                        ScamDetectorService._model_cooldowns[model_name] = now + ScamDetectorService._COOLDOWN_DURATION
-                    elif "404" in error_msg or "not found" in error_msg:
-                        logger.warning(f"⚠️ Detection model '{model_name}' not available — marked failed.")
-                    elif "timeout" in error_msg or "504" in error_msg:
-                        logger.warning(f"⏱️ Detection model '{model_name}' timed out — marked failed.")
-                    else:
-                        logger.error(f"❌ Detection error with '{model_name}': {error_msg}")
-                    
-                    if attempt < len(candidates):
-                        logger.info(f"🔄 Detection falling back to {candidates[attempt]}...")
-                        continue
-                    else:
-                        logger.error(f"❌ All {len(candidates)} detection models exhausted!")
-                        break
-                    
-            if not response_text:
-                raise last_error if last_error else Exception("All detection models failed to generate response")
+                    if attempt == settings.gemini_max_retries - 1:
+                        raise
+                    logger.warning(f"Gemini API attempt {attempt + 1} failed: {e}")
+                    continue
             
             # Parse JSON response - clean up markdown and trailing commas
             if response_text.startswith("```json"):
@@ -215,7 +154,7 @@ Must return ONLY a valid JSON object matching exactly this schema:
             
             # ENHANCED: Try to extract partial JSON fields before parsing (same as ai_agent.py)
             partial_fields = {}
-            for field in ['is_scam', 'scam_type', 'confidence', 'indicators', 'reasoning', 'severity']:
+            for field in ['is_scam', 'confidence', 'indicators', 'reasoning', 'severity']:
                 # Try to extract each field value
                 if f'"{field}"' in response_text or f"'{field}'" in response_text:
                     # Boolean fields
@@ -257,7 +196,6 @@ Must return ONLY a valid JSON object matching exactly this schema:
                             logger.warning(f"⚠️ JSON truncated. Using {len(partial_fields)} extracted fields: {list(partial_fields.keys())}")
                             result = {
                                 'is_scam': partial_fields.get('is_scam', False),
-                                'scam_type': partial_fields.get('scam_type', 'unknown'),
                                 'confidence': partial_fields.get('confidence', 0.0),
                                 'indicators': partial_fields.get('indicators', []),
                                 'reasoning': partial_fields.get('reasoning', 'Recovered from truncated JSON'),
@@ -271,7 +209,6 @@ Must return ONLY a valid JSON object matching exactly this schema:
                         logger.warning(f"⚠️ No JSON structure found. Using {len(partial_fields)} extracted fields.")
                         result = {
                             'is_scam': partial_fields.get('is_scam', False),
-                            'scam_type': partial_fields.get('scam_type', 'unknown'),
                             'confidence': partial_fields.get('confidence', 0.0),
                             'indicators': partial_fields.get('indicators', []),
                             'reasoning': partial_fields.get('reasoning', 'Recovered from malformed response'),
@@ -281,17 +218,20 @@ Must return ONLY a valid JSON object matching exactly this schema:
                         raise
             
             is_scam = result.get("is_scam", False)
-            scam_type = result.get("scam_type", "unknown")
             confidence = result.get("confidence", 0.0)
             indicators = result.get("indicators", [])
             reasoning = result.get("reasoning", "")
             severity = result.get("severity", "low")
             
             logger.info(
-                f"Scam detection: {is_scam} Type: {scam_type} (confidence: {confidence}, severity: {severity}) - {reasoning}"
+                f"Scam detection: {is_scam} (confidence: {confidence}, severity: {severity}) - {reasoning}"
             )
             
-            detection_result = (is_scam, confidence, indicators, scam_type)
+            detection_result = (is_scam, confidence, indicators)
+            
+            # Cache the result
+            if settings.enable_caching:
+                await cache.set(cache_key, detection_result, ttl=settings.cache_ttl)
             
             return detection_result
             
@@ -305,7 +245,7 @@ Must return ONLY a valid JSON object matching exactly this schema:
             # Fallback to keyword-based detection
             return self._fallback_detection(current_message)
     
-    def _fallback_detection(self, message: str) -> Tuple[bool, float, List[str], str]:
+    def _fallback_detection(self, message: str) -> Tuple[bool, float, List[str]]:
         """Fallback keyword-based scam detection with multi-lingual support"""
         message_lower = message.lower()
         
@@ -387,9 +327,6 @@ Must return ONLY a valid JSON object matching exactly this schema:
         
         is_scam = max_confidence >= 0.6
         
-        logger.warning(f"Using fallback detection: is_scam={is_scam}, confidence={max_confidence:.2f}, indicators={detected_indicators}")
+        logger.warning(f"Using fallback detection: is_scam={is_scam}, confidence={max_confidence}, indicators={detected_indicators}")
         
-        # Default scam_type for fallback detection
-        scam_type = "keyword_fallback" if is_scam else "unknown"
-        
-        return is_scam, max_confidence, detected_indicators, scam_type
+        return is_scam, max_confidence, detected_indicators

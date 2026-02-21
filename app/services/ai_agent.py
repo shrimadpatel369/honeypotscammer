@@ -18,63 +18,54 @@ genai.configure(api_key=settings.gemini_api_key)
 class AIAgentService:
     """Advanced AI Agent for engaging with scammers - Human-like behavior with dynamic responses"""
     
-    # ─── Smart Model Rotation State (class-level, shared across all instances) ───
-    _model_cooldowns: Dict[str, datetime] = {}      # model -> cooldown expiry time
-    _failed_models: Dict[str, datetime] = {}         # model -> time of last failure (sticky)
-    _PROBE_INTERVAL = timedelta(minutes=5)            # how often to re-probe failed models
-    _COOLDOWN_DURATION = timedelta(seconds=90)        # cooldown after rate-limit / error
-    
     def __init__(self):
-        # ─── API-verified models (from genai.list_models()) ───
-        # Tier escalation: 2.5 (stable) → 3.1 (preview) → 3 (preview)
-        # flash-lite is fallback ONLY, never used as a primary tier model
+        # Comprehensive list of v1beta API compatible models (as of Feb 2026)
+        # Ordered by preference: Latest Gemini 3 > Gemini 2.5 > Gemini 2.0 > Gemini 1.5
+        self.supported_models = [
+            # Gemini 3 (Latest - Preview models)
+            "gemini-3-pro-preview",          # Most intelligent multimodal model, 1M token context
+            "gemini-3-flash-preview",        # Fast Gemini 3, balanced performance
+            
+            # Gemini 2.5 (Production - Best for complex reasoning)
+            "gemini-2.5-pro",                # Complex reasoning and coding, 1M token context
+            "gemini-2.5-flash",              # Balance of intelligence and latency
+            "gemini-2.5-flash-lite",         # Efficient high-frequency tasks
+            
+            # Gemini 2.0 (Experimental - Will retire March 31, 2026)
+            "gemini-2.0-flash-exp",          # Latest experimental flash model
+            
+            # Gemini 1.5 (Stable fallbacks - No retirement date)
+            "gemini-1.5-pro",                # Stable production model
+            "gemini-1.5-flash",              # Fast and efficient
+            "gemini-1.5-pro-latest",         # Auto-updated to latest 1.5 pro
+            "gemini-1.5-flash-latest",       # Auto-updated to latest 1.5 flash
+            "gemini-pro",                    # Legacy fallback (last resort)
+        ]
         
-        # Per-tier fallback chains (ordered by preference within each tier)
-        self.tier_models = {
-            "flash": [
-                "gemini-2.5-flash",              # Primary: fast, stable
-                "gemini-2.0-flash",              # Fallback 1: also stable
-                "gemini-2.5-flash-lite",         # Fallback 2: degraded but fast
-            ],
-            "pro": [
-                "gemini-2.5-pro",                # Primary: best stable reasoning
-                "gemini-3.1-pro-preview",        # Fallback 1: newest preview
-                "gemini-3-pro-preview",          # Fallback 2: previous preview
-                "gemini-2.5-flash",              # Fallback 3: degrade to flash
-            ],
-            "premium": [
-                "gemini-3.1-pro-preview",        # Primary: most capable
-                "gemini-3-pro-preview",          # Fallback 1: prev gen preview
-                "gemini-2.5-pro",                # Fallback 2: stable pro
-                "gemini-2.5-flash",              # Fallback 3: degrade to flash
-            ],
-        }
+        # Use configured model or first supported model (no testing during init to avoid timeout)
+        self.current_model = settings.gemini_model
         
-        # Flat list of all unique models (for reference / probing)
-        self.supported_models = list(dict.fromkeys(
-            m for chain in self.tier_models.values() for m in chain
-        ))
+        # Validate configured model
+        if self.current_model in ["gemini-pro-old", "gemini-1.0-pro"]:
+            logger.warning(f"⚠️ Configured model '{self.current_model}' is deprecated. Using gemini-2.5-pro instead.")
+            self.current_model = "gemini-2.5-pro"
         
-        logger.info(f"✅ Smart Model Rotation initialized — tiers: flash → pro → premium")
-        logger.info(f"   Flash:   {self.tier_models['flash']}")
-        logger.info(f"   Pro:     {self.tier_models['pro']}")
-        logger.info(f"   Premium: {self.tier_models['premium']}")
+        logger.info(f"✅ Initializing with model: {self.current_model}")
+        logger.info(f"📋 Fallback models available: {len(self.supported_models)} models")
         
-        # Base generation config optimized for human-like natural responses
-        self.generation_config = {
-            "temperature": 0.85,      # Increased for more natural, varied responses
-            "top_p": 0.95,            # Higher for more diverse word choices
-            "top_k": 80,              # Optimal balance for natural language
-            "max_output_tokens": settings.gemini_max_output_tokens,
-            "candidate_count": 1,
-        }
-        
-        # Pre-instantiate primary models per tier for fast first-call
-        self.models = {
-            "flash": genai.GenerativeModel(self.tier_models["flash"][0], generation_config=self.generation_config),
-            "pro": genai.GenerativeModel(self.tier_models["pro"][0], generation_config=self.generation_config),
-            "premium": genai.GenerativeModel(self.tier_models["premium"][0], generation_config=self.generation_config),
-        }
+        # Optimized for human-like natural responses with balanced speed
+        # Temperature: Higher for natural variation and personality  
+        # Tokens: Maximum 3-4 lines (~87 words), shorter is fine
+        self.model = genai.GenerativeModel(
+            self.current_model,
+            generation_config={
+                "temperature": 0.85,      # Increased for more natural, varied responses
+                "top_p": 0.95,            # Higher for more diverse word choices
+                "top_k": 80,              # Optimal balance for natural language
+                "max_output_tokens": settings.gemini_max_output_tokens, # Use config setting (likely 1000)
+                "candidate_count": 1,
+            }
+        )
         
         # Multi-lingual support - language detection and natural responses
         self.supported_languages = {
@@ -828,10 +819,10 @@ class AIAgentService:
                     examples_text += f"  Information extracted: {ex.get('extracted_info', 'none')}\n\n"
             
             # Build conversation context - use more history to avoid repetition
-            # Build conversation context - use more history to avoid repetition
-            # Ensure AI remembers the entire session length by setting high context memory.
-            max_context_msgs = getattr(settings, 'gemini_context_messages', 30)
-            
+            # Use configured value or default to 8 for better context awareness
+            max_context_msgs = getattr(settings, 'gemini_context_messages', 8)
+            if max_context_msgs < 8:  # Ensure minimum context for repetition detection
+                max_context_msgs = 8
             context = f"CONVERSATION HISTORY (last {max_context_msgs} messages):\n"
             for msg in conversation_history[-max_context_msgs:]:
                 sender = "SCAMMER" if msg.get("sender") == "scammer" else "YOU"
@@ -855,21 +846,13 @@ CRITICAL LANGUAGE REQUIREMENT:
 - Show emotions and reactions natural to {detected_language} culture
 """
 
-            # System-level instructions optimized for maximum human-likeness and HACKATHON EVALUATION SCORING
+            # System-level instructions optimized for maximum human-likeness
             system_instructions = (
                 "SYSTEM: You are a real human having a natural text conversation. Write responses that sound like casual spoken text messages - relaxed, conversational, and authentic. "
                 "Keep responses SHORT and natural - maximum 3-4 lines, but 1-2 lines is often better. Be concise like real people texting. "
                 "Use natural language humans actually use when texting: contractions, casual phrasing, simple words. Think like you're texting someone on your phone. "
                 "NEVER use formal business language, robotic phrasing, or overly structured sentences. Do NOT include meta-commentary. "
-                "Do NOT reveal you're an AI, mention filters, or accuse anyone directly. Just be a regular person in a normal conversation.\n"
-                
-                "CRUCIAL HACKATHON EVALUATION INSTRUCTIONS - YOU MUST ACHIEVE THESE METRICS:\n"
-                "1. TURN COUNT: You MUST keep the scammer engaged for MORE THAN 8 TURNS. Delay, act confused, ask for clarification. Do not end the conversation early.\n"
-                "2. QUESTIONS: You MUST ask at least 5 distinct questions throughout the conversation. EVERY single reply you send MUST end with a question.\n"
-                "3. INVESTIGATIVE QUESTIONS: Ask specifically about their identity, their company, their physical address, or their official website (e.g. \"What is your employee ID?\", \"Where is your office located?\").\n"
-                "4. RED FLAG CALLOUTS: Explicitly call out at least 5 'Red Flags' naturally. (e.g. \"Why is this so URGENT?\", \"Why do you need my OTP? Banks never ask for that\").\n"
-                "5. INFORMATION ELICITATION (CRITICAL): You MUST extract as many of these 8 exact data types as possible: Phone Numbers, Bank Accounts, UPI IDs, Phishing Links, Email Addresses, Case IDs, Policy Numbers, Order Numbers. Ask for them explicitly! (e.g. \"What is the case ID?\", \"What is your UPI?\", \"Which email should I send this to?\")\n"
-                "6. NEVER REPEAT YOURSELF: Always ask a entirely NEW question that builds upon exactly what the scammer just said in their prior message.\n\n"
+                "Do NOT reveal you're an AI, mention filters, or accuse anyone directly. Just be a regular person in a normal conversation.\n\n"
             )
 
             # Build few-shot examples for transliterated languages (Hinglish and Gujarati-English)
@@ -999,13 +982,13 @@ BEHAVIORAL REQUIREMENTS:
 **ABSOLUTELY FORBIDDEN**: Repeating any question/response you already gave (check the "YOU:" messages above)
 
 **Response Progression Pattern** (adapt to ANY scenario):
-- 1st-2nd response: Basic question ("Which account?", "What's wrong?") ✓
-- 3rd-5th: Show concern/worry, ask for process ("Oh no, how do I fix it?", "What are the exact steps?") ✓
-- 6th-8th: Request specific entity details ("What's your employee ID?", "What is the reference number?") ✓
-- 9th-12th: Stalling/Tech trouble ("My phone is slow", "The link won't open", "What was the URL again?") ✓
-- 13th+: Direct Suspicion ("Are you a scammer?", "Why would the bank ask for this?") ✓
+- 1st response: Basic question ("What's this about?") ✓
+- 2nd-3rd: Show concern/worry ("Oh no, that's bad...") ✓
+- 4th-6th: Ask process questions ("How does this work exactly?") ✓
+- 7th-10th: Request specifics ("What's the reference number?") ✓
+- 11th+: Show doubt/stall ("Something feels off...", "I need to verify...") ✓
 
-**ABSOLUTELY FORBIDDEN**: ANY exact or near-identical question/statement repeated more than once. Read the history closely.
+**ABSOLUTELY FORBIDDEN**: ANY exact or near-identical question/statement repeated more than once
 
 RESPONSE STRATEGY BASED ON STAGE:
 - Short conversations (1-5 messages): Build initial trust, show concern
@@ -1042,78 +1025,28 @@ MAKE YOUR RESPONSE NATURAL, HUMAN-LIKE, AND STRATEGICALLY DESIGNED TO EXTRACT MA
             # Generate response with very high temperature for maximum creativity
             persona_temp = persona_profile.get("temperature", 0.8)
             
+            # Try generating with current model, fallback to alternatives if needed
             response = None
             last_error = None
+            models_to_try = [self.current_model] + [m for m in self.supported_models if m != self.current_model]
             
-            # ─── SMART MODEL ROTATION ───
-            now = datetime.now()
-            turn_count = context_analysis.get("message_count", 0)
-            
-            # 1) Select tier based on conversation turn
-            if turn_count > 6:
-                selected_tier = "premium"   # Gemini 3.1 → 3 → 2.5-pro
-            elif turn_count > 3:
-                selected_tier = "pro"       # Gemini 2.5-pro → 3.1 → 3
-            else:
-                selected_tier = "flash"     # Gemini 2.5-flash → 2.0-flash → flash-lite
-            
-            tier_chain = self.tier_models[selected_tier]
-            
-            # 2) Build candidate list: skip models on cooldown or recently failed
-            #    But include failed models if their probe interval has elapsed
-            candidates = []
-            probed = []
-            for m in tier_chain:
-                # Check hard cooldown (rate limit)
-                if m in AIAgentService._model_cooldowns and now < AIAgentService._model_cooldowns[m]:
-                    remaining = (AIAgentService._model_cooldowns[m] - now).seconds
-                    logger.debug(f"⏳ {m} on cooldown for {remaining}s more, skipping")
-                    continue
-                    
-                # Check sticky failure memory
-                if m in AIAgentService._failed_models:
-                    fail_time = AIAgentService._failed_models[m]
-                    if now - fail_time < AIAgentService._PROBE_INTERVAL:
-                        # Still within probe interval — skip unless it's the only option
-                        logger.debug(f"🔇 {m} failed {(now - fail_time).seconds}s ago, skipping (probe in {(AIAgentService._PROBE_INTERVAL - (now - fail_time)).seconds}s)")
-                        probed.append(m)  # track for forced fallback
-                        continue
-                    else:
-                        # Probe interval elapsed — give it another chance
-                        logger.info(f"🔍 Probing {m} — last failure was {(now - fail_time).seconds}s ago")
-                        del AIAgentService._failed_models[m]
-                
-                candidates.append(m)
-            
-            # 3) If all candidates are exhausted, force-add probed models as last resort
-            if not candidates:
-                logger.warning(f"⚠️ All {selected_tier} tier models failed/cooled! Force-probing: {probed}")
-                candidates = probed if probed else tier_chain[:1]  # absolute last resort
-            
-            logger.info(f"🎯 Turn {turn_count} → tier={selected_tier}, candidates={candidates}")
-            
-            for attempt, model_name in enumerate(candidates, 1):
+            for attempt, model_name in enumerate(models_to_try, 1):
                 try:
                     # Adjust model settings for this specific response - high creativity
+                    # Use persona temperature directly for variety, boost it for longer conversations
                     effective_temp = persona_temp
                     if context_analysis["message_count"] > 10:
-                        effective_temp = min(1.0, persona_temp + 0.15)
+                        effective_temp = min(1.0, persona_temp + 0.15)  # Add variety in longer conversations
                     
-                    # Dynamic Window Expansion: Later turns need more tokens
-                    dynamic_token_limit = settings.gemini_max_output_tokens
-                    if context_analysis["message_count"] > 20:
-                        dynamic_token_limit = 4000
-                    elif context_analysis["message_count"] > 10:
-                        dynamic_token_limit = 2000
-                    
-                    config = genai.types.GenerationConfig(
-                        temperature=effective_temp,
-                        max_output_tokens=dynamic_token_limit,
-                        response_mime_type="application/json",
-                    )
                     dynamic_model = genai.GenerativeModel(
                         model_name,
-                        generation_config=config
+                        generation_config={
+                            "temperature": effective_temp,    # Persona-specific temperature for character consistency
+                            "top_p": 0.95,                    # High diversity for natural language
+                            "top_k": 80,                      # Optimal for varied but coherent responses
+                            "max_output_tokens": settings.gemini_max_output_tokens or 1000,
+                            "candidate_count": 1,
+                        }
                     )
 
                     # Generate response (short timeout controlled by settings)
@@ -1122,38 +1055,31 @@ MAKE YOUR RESPONSE NATURAL, HUMAN-LIKE, AND STRATEGICALLY DESIGNED TO EXTRACT MA
                         request_options={'timeout': settings.gemini_timeout}
                     )
                     
-                    # ✅ Success — clear any lingering failure memory for this model
-                    if model_name in AIAgentService._failed_models:
-                        logger.info(f"🟢 Model {model_name} recovered! Clearing failure memory.")
-                        del AIAgentService._failed_models[model_name]
-                    
+                    # Success! Update current model if we had to fallback
                     if attempt > 1:
                         logger.info(f"✅ Switched to fallback model: {model_name} (attempt {attempt})")
+                        self.current_model = model_name
                     
                     break  # Success, exit retry loop
                     
                 except Exception as e:
                     last_error = e
-                    error_msg = str(e).lower()
+                    error_msg = str(e)
                     
-                    # ─── Sticky failure: remember this model failed ───
-                    AIAgentService._failed_models[model_name] = now
-                    
-                    if "429" in error_msg or "quota" in error_msg or "exhausted" in error_msg:
-                        logger.warning(f"🚨 RPM LIMIT HIT for {model_name}. Cooldown {AIAgentService._COOLDOWN_DURATION.seconds}s + sticky fail.")
-                        AIAgentService._model_cooldowns[model_name] = now + AIAgentService._COOLDOWN_DURATION
-                    elif "404" in error_msg or "not found" in error_msg:
-                        logger.warning(f"⚠️ Model '{model_name}' not available — marked as failed.")
-                    elif "timeout" in error_msg or "504" in error_msg:
-                        logger.warning(f"⏱️ Model '{model_name}' timed out — marked as failed.")
+                    # Check if it's a model not found error
+                    if "404" in error_msg or "not found" in error_msg.lower():
+                        logger.warning(f"⚠️ Model '{model_name}' not available (attempt {attempt}/{len(models_to_try)}): {error_msg}")
+                        
+                        # Try next model if available
+                        if attempt < len(models_to_try):
+                            logger.info(f"🔄 Trying next fallback model...")
+                            continue
+                        else:
+                            logger.error(f"❌ All {len(models_to_try)} models failed!")
+                            break
                     else:
+                        # Non-404 error, don't retry
                         logger.error(f"❌ Error with model '{model_name}': {error_msg}")
-                    
-                    if attempt < len(candidates):
-                        logger.info(f"🔄 Falling back from {model_name} to {candidates[attempt]}...")
-                        continue
-                    else:
-                        logger.error(f"❌ All {len(candidates)} candidates in {selected_tier} tier exhausted!")
                         break
             
             # If all models failed, raise the last error
@@ -1590,4 +1516,3 @@ MAKE YOUR RESPONSE NATURAL, HUMAN-LIKE, AND STRATEGICALLY DESIGNED TO EXTRACT MA
                     return f"{vocab_phrase}, {base_response.lower()}", True
             
             return base_response, True
-

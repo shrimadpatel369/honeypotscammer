@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     app_name: str = "Honeypot Scam Detection API"
     env: str = "production"
     debug: bool = False
-    api_key: str = ""
+    api_key: str
     
     # Server (PORT is auto-set by Cloud Run)
     host: str = "0.0.0.0"
@@ -18,8 +18,8 @@ class Settings(BaseSettings):
     workers: int = 4
     
     # MongoDB (Cloud Optimized)
-    mongodb_url: str = "mongodb://localhost:27017"
-    mongodb_db_name: str = "honeypotfraud"
+    mongodb_url: str
+    mongodb_db_name: str = "honeypot_db"
     mongodb_max_pool_size: int = 100
     mongodb_min_pool_size: int = 10
     mongodb_max_idle_time_ms: int = 45000
@@ -27,24 +27,23 @@ class Settings(BaseSettings):
     mongodb_server_selection_timeout_ms: int = 5000
     
     # Google Gemini (Premium) - Optimized for human-like responses
-    gemini_api_key: str = ""
-    gemini_model: str = "gemini-2.5-flash-lite"    # Fast base detection model
+    gemini_api_key: str
+    gemini_model: str = "gemini-3-pro-preview"    # Best model first
     gemini_max_retries: int = 3
-    gemini_timeout: int = 12                       # Internal limit of 10-15s
-    gemini_context_messages: int = 30              # Full conversation history
-    gemini_max_output_tokens: int = 1500
-    gemini_temperature: float = 0.95
+    gemini_timeout: int = 35                       # Slight buffer for ~30s target response time
+    gemini_context_messages: int = 10              # Full conversation history to prevent repetition
+    gemini_max_output_tokens: int = 1000            # Increased to prevent JSON truncation (content length controlled by prompt)
+    gemini_temperature: float = 0.85               # Higher for more natural, human-like variation
     
     # GUVI Callback
     guvi_callback_url: str = "https://hackathon.guvi.in/api/updateHoneyPotFinalResult"
     
     # Performance
     max_connections: int = 100
-    connection_timeout: int = 360
-    request_timeout: int = 35
-    enable_caching: bool = False
+    connection_timeout: int = 30
+    request_timeout: int = 60
+    enable_caching: bool = True
     cache_ttl: int = 300
-    inactivity_threshold_minutes: float = 5.0  # 180 seconds to align with max points
     
     # Security
     cors_origins: List[str] = ["*"]
@@ -53,8 +52,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
-        case_sensitive=False,
-        extra="ignore"
+        case_sensitive=False
     )
 
 

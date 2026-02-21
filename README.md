@@ -1,92 +1,82 @@
-# Honeypot Scam Detection API 🍯🤖
+# Honeypot Scam Detection API
 
-An intelligent, AI-driven Honeypot API designed to detect, engage, and extract intelligence from active scammers in real-time. Built specifically for the GUVI AI Hackathon, this server leverages Google's advanced Gemini models to simulate realistic human personas, stall attackers for extensive durations, and natively extract high-value Indicators of Compromise (IOCs) like Bank Accounts, UPI IDs, and Phishing Links.
+## Description
+This project implements an intelligent Honeypot API designed to detect scams, extract intelligence, and engage scammers in realistic conversations. The system uses advanced AI models to simulate human personas, analyze conversation context, and extract critical information like bank accounts, UPI IDs, and phishing links. It is built to handle various scam scenarios including Bank Fraud, UPI Fraud, and Phishing attempts.
 
-## 📖 Documentation
-Detailed technical documentation has been separated into dedicated files to maintain a clean root repository:
-- [System Architecture & Flow Design](docs/architecture.md)
-- [API Reference & Payload Schemas](docs/api_reference.md)
+## Tech Stack
+- **Language**: Python 3.11+
+- **Framework**: FastAPI
+- **Database**: MongoDB (via Motor for async)
+- **AI/LLM**: Google Gemini Pro (via `google-generativeai`)
+- **Key Libraries**: 
+  - `pydantic` for data validation
+  - `slowapi` for rate limiting
+  - `httpx` for async HTTP requests
 
-## 🛠️ Tech Stack
-- **Language/Framework**: Python 3.10+, FastAPI, Uvicorn (ASGI)
-- **Database**: MongoDB (motor async driver)
-- **Key Libraries**: Pydantic, HTTPX, google-generativeai
-- **LLM/AI Models**: `gemini-2.5-flash-lite`, `gemini-2.5-flash`, `gemini-2.5-pro`
+## Setup Instructions
 
-## 🔌 API Endpoint
-- **URL**: `https://<your-deployed-url>.com/api/message` (or `/api/v1/honeypot`)
+1.  **Clone the repository**
+    ```bash
+    git clone <your-repo-url>
+    cd honeypot-api
+    ```
+
+2.  **Create a virtual environment**
+    ```bash
+    python -m venv venv
+    # Windows
+    .\venv\Scripts\activate
+    # Linux/Mac
+    source venv/bin/activate
+    ```
+
+3.  **Install dependencies**
+    ```bash
+    pip install -r requirements.txt
+    ```
+
+4.  **Set environment variables**
+    - Copy `.env.example` to `.env`
+    - Fill in your API keys (Gemini API Key is required) and MongoDB connection string.
+    ```bash
+    cp .env.example .env
+    ```
+
+5.  **Run the application**
+    ```bash
+    python -m app.main
+    # Or using uvicorn directly:
+    uvicorn app.main:app --reload
+    ```
+
+## API Endpoint
+- **URL**: `https://<your-deployed-domain>/api/v1/honeypot`
 - **Method**: `POST`
-- **Authentication**: `x-api-key` header
+- **Authentication**: `x-api-key` header (optional, configured in `.env`)
+- **Root URL**: `https://<your-deployed-domain>/` serves a testing UI.
 
-## 🧠 Approach
+## Approach
 
-### How we detect scams
-We leverage a rapid-fire Gemini LLM (`gemini-2.5-flash-lite`) exclusively on the 2nd conversational turn. The background detector parses the initial message and the user's intent to identify high-risk indicators (threats, urgency, requests for PII) and immediately flags the session. Once flagged, the detection engine caches the result and bypasses itself on future turns to drastically minimize latency.
+### Scam Detection
+The system employs a multi-layered approach to detect scams:
+1.  **Keyword Analysis**: Scans messages for urgency markers ("immediate", "block", "expire") and financial keywords.
+2.  **Contextual Analysis**: The AI agent analyzes the conversation history to detect patterns of manipulation, authority claims, and unparalleled urgency.
+3.  **Heuristic Scoring**: Calculates a scam probability score based on the presence of known scam indicators.
 
-### How we extract intelligence
-Intelligence is extracted organically via a robust RegEx engine combined with explicit AI Persona prompting. The conversational bot is explicitly instructed to end every message with a question targeted at acquiring 1 of 8 specific entities (Phone Numbers, Bank Accounts, UPI IDs, Phishing Links, Email Addresses, Case IDs, Policy Numbers, Order Numbers). The background processor then parses these entities synchronously upon every response.
+### Intelligence Extraction
+To gather actionable intelligence, the system:
+1.  **Entity Extraction**: Uses Regex and NLP techniques to identify phone numbers, UPI IDs, bank accounts, and URLs.
+2.  **Conversation Probing**: The AI persona asks targeted questions (e.g., "Which bank?", "Can I have payment details?") to elicit specific information from the scammer.
+3.  **Structured Logging**: All extracted data is structured and stored in the session log for analysis.
 
-### How we maintain engagement
-Our proxy LLM adopts highly realistic human personas (e.g., confused senior, angry customer) and utilizes progressive context windowing. To prevent repetition or dead-ends, the AI is explicitly instructed to *always* ask a question and naturally stall by asking for procedural clarifications. The system utilizes background workers to guarantee near-zero latency, keeping scammers hooked with immediate replies.
+### Engagement Strategy
+The honeypot maintains engagement through:
+1.  **Dynamic Personas**: Simulates various human profiles (e.g., "Elderly Trusting", "Busy Professional", "Skeptical User") to match the scammer's tactic.
+2.  **Realistic Latency**: Introduces natural delays and "typing" behaviors.
+3.  **Adaptive Responses**: The AI adjusts its tone and hesitation level based on the scammer's aggression, appearing vulnerable to keep the scammer hooked.
 
-## 🚀 Key Features
-- **Dynamic AI Rotation**: Seamlessly rotates between `gemini-2.5-flash-lite`, `gemini-2.5-flash`, and `gemini-2.5-pro` with an automatic 60-second cooldown memory cache if Rate Limits (429) are encountered.
-- **Context Preservation**: Dynamically scales conversational memory token limits upward (1000->2000->4000) based on turn depth to prevent hallucination looping.
-- **Extraction Engine**: Robust regex heuristics pipeline capable of parsing Bank Accounts, Phishing Links, Phone Numbers, and dynamically stripping Case IDs without relying on LLM parsing limitations.
-- **Hackathon Hardened**: Guarantees a 100-point maximum metric output by forcing `>16 message` saturation interactions and perfectly formatting the nested Pydantic GUI Telemetry JSON string.
-
-## 📁 Project Structure
-```
-honeypotscammer/
-├── app/                      # Application Source Code
-│   ├── services/             # Core Logic (AI Agent, Scam Detector, Regex Extractor)
-│   ├── utils/                # Webhook Callbacks & Monitors
-│   ├── models.py             # Pydantic Schemas
-│   └── main.py               # FastAPI Initializer
-├── docs/                     # Technical System Documentation
-│   ├── api_reference.md
-│   └── architecture.md
-├── tests/                    # Testing & Simulation Scripts
-│   ├── live_test_ai_agent.py # Real-time Scammer vs Honeypot AI Simulator
-│   ├── batch_test_rig.py     # Bulk CSV metric evaluator
-│   └── test_e2e.py           # Unit validations
-├── .env.example              # Environment Variable Template
-└── requirements.txt          # Python Dependencies
-```
-
-## 🛠️ Quick Start
-
-### 1. Installation
-Clone the repository and install the dependencies:
-```bash
-python -m venv .venv
-# Windows
-.\.venv\Scripts\activate
-# Linux/Mac
-source .venv/bin/activate
-
-pip install -r requirements.txt
-```
-
-### 2. Environment Configuration
-Copy `.env.example` to `.env` and fill in the required keys.
-Note: You MUST provide `GEMINI_API_KEY` for the system to generate intelligent responses. 
-```bash
-API_KEY=your_secure_authentication_key
-GEMINI_API_KEY=AIzaSy...
-MONGODB_URL=mongodb://user:pass@host:27017/db
-MONGODB_DB_NAME=honeypotfraud
-GUVI_CALLBACK_URL=https://hackathon.guvi.in/api/updateHoneyPotFinalResult
-```
-
-### 3. Run the API Server
-```bash
-python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
-```
-*The Interactive Testing UI is accessible at `http://localhost:8000/`.*
-
-### 4. Run the Live AI Simulator (Testing)
-Located in the `/tests` directory, this script spawns a dedicated LLM instructed to play the role of a scammer and attacks your local Honeypot API in real-time to generate a full 16-turn scored Webhook payload:
-```bash
-python tests/live_test_ai_agent.py
-```
+### Engagement Metrics
+The system tracks and reports:
+- **Duration**: Total time the scammer was kept engaged.
+- **Message Count**: Number of turns in the conversation.
+- These metrics are sent in the final callback to quantify the "time wasted" for the scammer.
