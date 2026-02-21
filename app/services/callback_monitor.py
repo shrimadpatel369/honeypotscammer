@@ -78,50 +78,13 @@ class CallbackMonitor:
                 try:
                     logger.info(f"⏰ Auto-sending callback for inactive session: {session_id}")
                     
-                    # Calculate or get engagement metrics
-                    engagement_metrics = session.get("engagementMetrics")
-                    
-                    if not engagement_metrics:
-                        # Fallback calculation if not saved in session
-                        try:
-                            start_time = session.get("startTime")
-                            last_update = session.get("lastUpdateTime")
-                            duration = 0
-                            
-                            if start_time and last_update:
-                                # Handle string timestamps
-                                if isinstance(start_time, str):
-                                    start_time = datetime.fromisoformat(start_time.replace('Z', '+00:00'))
-                                if isinstance(last_update, str):
-                                    last_update = datetime.fromisoformat(last_update.replace('Z', '+00:00'))
-                                
-                                # Ensure timezone awareness
-                                if start_time.tzinfo is None:
-                                    start_time = start_time.replace(tzinfo=timezone.utc)
-                                if last_update.tzinfo is None:
-                                    last_update = last_update.replace(tzinfo=timezone.utc)
-                                    
-                                duration = max(0, int((last_update - start_time).total_seconds()))
-                                
-                            engagement_metrics = {
-                                "engagementDurationSeconds": duration,
-                                "totalMessagesExchanged": session.get("totalMessages", 0)
-                            }
-                        except Exception as metric_error:
-                            logger.error(f"Error calculating metrics for inactive session: {metric_error}")
-                            engagement_metrics = {
-                                "engagementDurationSeconds": 0,
-                                "totalMessagesExchanged": session.get("totalMessages", 0)
-                            }
-                    
                     # Send callback
                     callback_success = await send_guvi_callback(
                         session_id=session_id,
                         scam_detected=session.get("scamDetected", False),
                         total_messages=session.get("totalMessages", 0),
                         extracted_intelligence=session.get("extractedIntelligence", {}),
-                        engagement_metrics=engagement_metrics,
-                        agent_notes=session.get("agentNotes", "")
+                        agent_notes=session.get("agentNotes", "").strip(" |")
                     )
                     
                     if callback_success:
