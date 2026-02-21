@@ -74,9 +74,3 @@ The honeypot maintains engagement through:
 1.  **Dynamic Personas**: Simulates various human profiles (e.g., "Elderly Trusting", "Busy Professional", "Skeptical User") to match the scammer's tactic.
 2.  **Realistic Latency**: Introduces natural delays and "typing" behaviors.
 3.  **Adaptive Responses**: The AI adjusts its tone and hesitation level based on the scammer's aggression, appearing vulnerable to keep the scammer hooked.
-
-### Engagement Metrics
-The system tracks and reports:
-- **Duration**: Total time the scammer was kept engaged.
-- **Message Count**: Number of turns in the conversation.
-- These metrics are sent in the final callback to quantify the "time wasted" for the scammer.
