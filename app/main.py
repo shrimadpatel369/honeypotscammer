@@ -582,14 +582,95 @@ async def honeypot_endpoint(request: Request, honeypot_request: HoneypotRequest,
         )
         logger.info(f"AI agent synchronously generated response for session {honeypot_request.sessionId}")
         
-        # Offload heavy Analytics, Intelligence Extraction, and Datastore routing to FastAPI BackgroundTasks
-        background_tasks.add_task(
-            process_background_tasks,
-            honeypot_request=honeypot_request,
-            session=session,
-            all_messages=all_messages,
-            agent_reply=agent_reply,
-            should_continue=should_continue
+        # Extract intelligence from conversation
+        extracted_intelligence = await intelligence_extractor.extract_intelligence(
+            conversation_history=[msg.model_dump() for msg in all_messages],
+            current_extraction=session["extractedIntelligence"]
+        )
+        
+        # Update session
+        session["conversationHistory"] = [msg.model_dump() for msg in all_messages]
+        if agent_reply:
+            session["conversationHistory"].append({
+                "sender": "user",
+                "text": agent_reply,
+                "timestamp": honeypot_request.message.timestamp.isoformat()
+            })
+        
+        session["extractedIntelligence"] = extracted_intelligence
+        session["lastUpdateTime"] = honeypot_request.message.timestamp
+        session["totalMessages"] = len(session["conversationHistory"])
+        
+        # Update agent notes
+        if scam_indicators:
+            session["agentNotes"] = f"{session['agentNotes']} | {', '.join(scam_indicators)}"
+        
+        # Calculate engagement metrics
+        start_time_session = session["startTime"]
+        if isinstance(start_time_session, str):
+            start_time_session = datetime.fromisoformat(start_time_session.replace('Z', '+00:00'))
+        
+        # Ensure both timestamps are timezone-aware (UTC)
+        current_timestamp = honeypot_request.message.timestamp
+        if current_timestamp.tzinfo is None:
+            current_timestamp = current_timestamp.replace(tzinfo=timezone.utc)
+        if start_time_session.tzinfo is None:
+            start_time_session = start_time_session.replace(tzinfo=timezone.utc)
+        
+        # Calculate duration, handle negative durations
+        duration_seconds = max(0, int((current_timestamp - start_time_session).total_seconds()))
+        
+        engagement_metrics = {
+            "engagementDurationSeconds": duration_seconds,
+            "totalMessagesExchanged": session["totalMessages"]
+        }
+        
+        # Check if conversation should end
+        if not should_continue or session["totalMessages"] >= 30:  # Max 30 messages
+            session["status"] = "completed"
+            logger.info(f"Session {honeypot_request.sessionId} completed")
+            
+            # Auto-learn from successful session
+            if session["scamDetected"]:
+                try:
+                    await training_manager.learn_from_session(session)
+                    logger.info(f"🎓 Learning completed for session {honeypot_request.sessionId}")
+                except Exception as learn_error:
+                    logger.error(f"Learning error: {learn_error}")
+            
+            # Send final callback to GUVI
+            logger.info(f"Scam Detected: {session['scamDetected']} for session {honeypot_request.sessionId}")
+            logger.info(f"Session Callback Sent ? {session.get('callbackSent', False)}")
+            
+            if session["scamDetected"] and not session.get("callbackSent", False):
+                logger.info(f"Preparing to send GUVI callback for session {honeypot_request.sessionId}")
+                callback_success = await send_guvi_callback(
+                    session_id=honeypot_request.sessionId,
+                    scam_detected=session["scamDetected"],
+                    total_messages=session["totalMessages"],
+                    extracted_intelligence=session.get("extractedIntelligence", {}),
+                    engagement_metrics=engagement_metrics,
+                    agent_notes=session.get("agentNotes", "")
+                )
+                if callback_success:
+                    session["callbackSent"] = True
+                    session["callbackSentTime"] = honeypot_request.message.timestamp.isoformat()
+                    logger.info(f"Successfully sent GUVI callback for session {honeypot_request.sessionId}")
+                    
+                    # Learn from successful session for future improvements
+                    try:
+                        await training_manager.learn_from_session(session)
+                        logger.info(f"🎓 Session data queued for live learning: {honeypot_request.sessionId}")
+                    except Exception as e:
+                        logger.error(f"Failed to learn from session: {e}")
+                else:
+                    logger.error(f"Failed to send GUVI callback for session {honeypot_request.sessionId}")
+        
+        # Save session to database
+        await sessions_collection.update_one(
+            {"sessionId": honeypot_request.sessionId},
+            {"$set": session},
+            upsert=True
         )
         
         # Calculate processing time
